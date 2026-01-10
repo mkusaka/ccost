@@ -14,6 +14,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 
 const CLAUDE_CONFIG_DIR_ENV: &str = "CLAUDE_CONFIG_DIR";
 const CLAUDE_PROJECTS_DIR_NAME: &str = "projects";
@@ -187,12 +188,13 @@ pub struct GlobResult {
     pub base_dir: PathBuf,
 }
 
-type GroupKey = (String, Option<String>);
+type GroupKey = (String, Option<Arc<str>>);
+type MonthKey = (String, Option<String>);
 
 struct ParsedRecord {
     unique_hash: Option<String>,
     date: String,
-    project: Option<String>,
+    project: Option<Arc<str>>,
     model: Option<String>,
     tokens: UsageTokens,
     cost: f64,
@@ -252,9 +254,8 @@ pub fn get_claude_paths() -> Result<Vec<PathBuf>> {
 
 fn parse_file_records(
     file: &Path,
-    project: &str,
+    project: Option<Arc<str>>,
     timezone: Option<chrono_tz::Tz>,
-    needs_project_grouping: bool,
     options: &LoadOptions,
     pricing: Option<&PricingFetcher>,
 ) -> Result<Vec<ParsedRecord>> {
@@ -289,11 +290,7 @@ fn parse_file_records(
         records.push(ParsedRecord {
             unique_hash,
             date,
-            project: if needs_project_grouping {
-                Some(project.to_string())
-            } else {
-                None
-            },
+            project: project.clone(),
             model,
             tokens,
             cost,
@@ -598,7 +595,11 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
     let file_entries = sorted_files
         .into_iter()
         .map(|file| {
-            let project = extract_project_from_path(&file);
+            let project = if needs_project_grouping {
+                Some(Arc::<str>::from(extract_project_from_path(&file)))
+            } else {
+                None
+            };
             (file, project)
         })
         .collect::<Vec<_>>();
@@ -611,9 +612,8 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
             .map(|(file, project)| {
                 parse_file_records(
                     file,
-                    project,
+                    project.clone(),
                     parsed_timezone,
-                    needs_project_grouping,
                     &options,
                     pricing_ref,
                 )
@@ -663,6 +663,7 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
 
     let mut results = Vec::new();
     for ((date, project), aggregate) in aggregates {
+        let project = project.map(|value| value.to_string());
         let mut model_breakdowns = aggregate
             .model_breakdowns
             .into_iter()
@@ -724,7 +725,7 @@ pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>
         return Ok(Vec::new());
     }
 
-    let mut aggregates: HashMap<GroupKey, Aggregate> = HashMap::new();
+    let mut aggregates: HashMap<MonthKey, Aggregate> = HashMap::new();
     let needs_project_grouping = options.group_by_project || options.project.is_some();
 
     for entry in daily {
