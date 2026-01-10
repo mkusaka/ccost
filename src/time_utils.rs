@@ -21,12 +21,17 @@ impl FromStr for SortOrder {
 }
 
 pub fn format_date(timestamp: &str, timezone: Option<&str>) -> Option<String> {
+    let tz = match timezone {
+        Some(tz_str) => Some(Tz::from_str(tz_str).ok()?),
+        None => None,
+    };
+    format_date_with_tz(timestamp, tz)
+}
+
+pub fn format_date_with_tz(timestamp: &str, timezone: Option<Tz>) -> Option<String> {
     let parsed = DateTime::parse_from_rfc3339(timestamp).ok()?;
     let date = match timezone {
-        Some(tz_str) => {
-            let tz = Tz::from_str(tz_str).ok()?;
-            parsed.with_timezone(&tz).date_naive()
-        }
+        Some(tz) => parsed.with_timezone(&tz).date_naive(),
         None => parsed.with_timezone(&Local).date_naive(),
     };
     Some(format!(

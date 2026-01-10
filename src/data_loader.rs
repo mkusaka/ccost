@@ -1,8 +1,11 @@
 use crate::pricing::{CostMode, PricingFetcher, UsageTokens};
-use crate::time_utils::{SortOrder, filter_by_date_range, format_date, format_month, sort_by_date};
+use crate::time_utils::{
+    SortOrder, filter_by_date_range, format_date_with_tz, format_month, sort_by_date,
+};
 use crate::token_utils::{AggregatedTokenCounts, get_total_tokens_from_aggregated};
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
+use chrono_tz::Tz;
 use jwalk::WalkDir;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -10,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 const CLAUDE_CONFIG_DIR_ENV: &str = "CLAUDE_CONFIG_DIR";
 const CLAUDE_PROJECTS_DIR_NAME: &str = "projects";
@@ -249,6 +253,7 @@ pub fn get_claude_paths() -> Result<Vec<PathBuf>> {
 fn parse_file_records(
     file: &Path,
     project: &str,
+    timezone: Option<chrono_tz::Tz>,
     options: &LoadOptions,
     pricing: Option<&PricingFetcher>,
 ) -> Result<Vec<ParsedRecord>> {
@@ -272,7 +277,7 @@ fn parse_file_records(
             None => return Ok(()),
         };
 
-        let date = match format_date(timestamp, options.timezone.as_deref()) {
+        let date = match format_date_with_tz(timestamp, timezone) {
             Some(date) => date,
             None => return Ok(()),
         };
@@ -540,6 +545,14 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
         get_claude_paths()?
     };
 
+    let parsed_timezone = match options.timezone.as_deref() {
+        Some(tz_str) => Tz::from_str(tz_str).ok(),
+        None => None,
+    };
+    if options.timezone.is_some() && parsed_timezone.is_none() {
+        return Ok(Vec::new());
+    }
+
     let all_files = glob_usage_files(&claude_paths);
     if all_files.is_empty() {
         return Ok(Vec::new());
@@ -581,7 +594,9 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
     for chunk in file_entries.chunks(batch_size) {
         let parsed_chunks = chunk
             .par_iter()
-            .map(|(file, project)| parse_file_records(file, project, &options, pricing_ref))
+            .map(|(file, project)| {
+                parse_file_records(file, project, parsed_timezone, &options, pricing_ref)
+            })
             .collect::<Vec<_>>();
 
         for records in parsed_chunks {
