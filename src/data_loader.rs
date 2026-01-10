@@ -489,6 +489,15 @@ fn update_model_breakdowns(
     tokens: &UsageTokens,
     cost: f64,
 ) {
+    if let Some(entry) = breakdowns.get_mut(model_name) {
+        entry.input_tokens += tokens.input_tokens;
+        entry.output_tokens += tokens.output_tokens;
+        entry.cache_creation_tokens += tokens.cache_creation_input_tokens;
+        entry.cache_read_tokens += tokens.cache_read_input_tokens;
+        entry.cost += cost;
+        return;
+    }
+
     let entry = breakdowns.entry(model_name.to_string()).or_default();
     entry.input_tokens += tokens.input_tokens;
     entry.output_tokens += tokens.output_tokens;
