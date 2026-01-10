@@ -183,6 +183,8 @@ pub struct GlobResult {
     pub base_dir: PathBuf,
 }
 
+type GroupKey = (String, Option<String>);
+
 struct ParsedRecord {
     unique_hash: Option<String>,
     date: String,
@@ -525,7 +527,7 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
     };
 
     let mut processed_hashes = HashSet::new();
-    let mut aggregates: HashMap<String, Aggregate> = HashMap::new();
+    let mut aggregates: HashMap<GroupKey, Aggregate> = HashMap::new();
 
     let needs_project_grouping = options.group_by_project || options.project.is_some();
 
@@ -556,53 +558,41 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
                     processed_hashes.insert(hash.clone());
                 }
 
+                let ParsedRecord {
+                    date,
+                    project,
+                    model,
+                    tokens,
+                    cost,
+                    ..
+                } = record;
                 let key = if needs_project_grouping {
-                    format!(
-                        "{date}\u{0}{project}",
-                        date = record.date,
-                        project = record.project
-                    )
+                    (date, Some(project))
                 } else {
-                    record.date.clone()
+                    (date, None)
                 };
 
                 let entry = aggregates.entry(key).or_default();
-                entry.input_tokens += record.tokens.input_tokens;
-                entry.output_tokens += record.tokens.output_tokens;
-                entry.cache_creation_tokens += record.tokens.cache_creation_input_tokens;
-                entry.cache_read_tokens += record.tokens.cache_read_input_tokens;
-                entry.total_cost += record.cost;
+                entry.input_tokens += tokens.input_tokens;
+                entry.output_tokens += tokens.output_tokens;
+                entry.cache_creation_tokens += tokens.cache_creation_input_tokens;
+                entry.cache_read_tokens += tokens.cache_read_input_tokens;
+                entry.total_cost += cost;
 
-                if let Some(model) = record.model.as_deref() {
+                if let Some(model) = model.as_deref() {
                     if model != "<synthetic>" {
                         entry.push_model(model);
-                        update_model_breakdowns(
-                            &mut entry.model_breakdowns,
-                            model,
-                            &record.tokens,
-                            record.cost,
-                        );
+                        update_model_breakdowns(&mut entry.model_breakdowns, model, &tokens, cost);
                     }
                 } else {
-                    update_model_breakdowns(
-                        &mut entry.model_breakdowns,
-                        "unknown",
-                        &record.tokens,
-                        record.cost,
-                    );
+                    update_model_breakdowns(&mut entry.model_breakdowns, "unknown", &tokens, cost);
                 }
             }
         }
     }
 
     let mut results = Vec::new();
-    for (group_key, aggregate) in aggregates {
-        let (date, project) = if let Some((date, project)) = group_key.split_once('\u{0}') {
-            (date.to_string(), Some(project.to_string()))
-        } else {
-            (group_key, None)
-        };
-
+    for ((date, project), aggregate) in aggregates {
         let mut model_breakdowns = aggregate
             .model_breakdowns
             .into_iter()
@@ -664,7 +654,7 @@ pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>
         return Ok(Vec::new());
     }
 
-    let mut aggregates: HashMap<String, Aggregate> = HashMap::new();
+    let mut aggregates: HashMap<GroupKey, Aggregate> = HashMap::new();
     let needs_project_grouping = options.group_by_project || options.project.is_some();
 
     for entry in daily {
@@ -673,15 +663,17 @@ pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>
             None => continue,
         };
         let key = if needs_project_grouping {
-            format!(
-                "{month}\u{0}{}",
-                entry
-                    .project
-                    .clone()
-                    .unwrap_or_else(|| "unknown".to_string())
+            (
+                month,
+                Some(
+                    entry
+                        .project
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_string()),
+                ),
             )
         } else {
-            month.clone()
+            (month, None)
         };
 
         let aggregate = aggregates.entry(key).or_default();
@@ -709,13 +701,7 @@ pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>
     }
 
     let mut results = Vec::new();
-    for (group_key, aggregate) in aggregates {
-        let (month, project) = if let Some((month, project)) = group_key.split_once('\u{0}') {
-            (month.to_string(), Some(project.to_string()))
-        } else {
-            (group_key, None)
-        };
-
+    for ((month, project), aggregate) in aggregates {
         let mut model_breakdowns = aggregate
             .model_breakdowns
             .into_iter()
