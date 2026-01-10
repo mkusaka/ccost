@@ -551,21 +551,19 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
         for records in parsed_chunks {
             let records = records?;
             for record in records {
-                if let Some(hash) = &record.unique_hash {
-                    if processed_hashes.contains(hash) {
-                        continue;
-                    }
-                    processed_hashes.insert(hash.clone());
-                }
-
                 let ParsedRecord {
+                    unique_hash,
                     date,
                     project,
                     model,
                     tokens,
                     cost,
-                    ..
                 } = record;
+                if let Some(hash) = unique_hash {
+                    if !processed_hashes.insert(hash) {
+                        continue;
+                    }
+                }
                 let key = if needs_project_grouping {
                     (date, Some(project))
                 } else {
