@@ -264,32 +264,32 @@ fn parse_file_records(
             Err(_) => return Ok(()),
         };
 
-        let message = match parsed.message.as_ref() {
-            Some(message) => message,
-            None => return Ok(()),
-        };
-        let tokens = match extract_usage_tokens(message) {
-            Some(tokens) => tokens,
-            None => return Ok(()),
-        };
+        let unique_hash = create_unique_hash(&parsed);
+        let cost = calculate_cost_for_entry(&parsed, options.mode, pricing);
         let timestamp = match parsed.timestamp.as_deref() {
             Some(ts) => ts,
             None => return Ok(()),
         };
-
         let date = match format_date_with_tz(timestamp, timezone) {
             Some(date) => date,
             None => return Ok(()),
         };
 
-        let cost = calculate_cost_for_entry(&parsed, options.mode, pricing);
-        let unique_hash = create_unique_hash(&parsed);
+        let message = match parsed.message {
+            Some(message) => message,
+            None => return Ok(()),
+        };
+        let tokens = match extract_usage_tokens(&message) {
+            Some(tokens) => tokens,
+            None => return Ok(()),
+        };
+        let model = message.model;
 
         records.push(ParsedRecord {
             unique_hash,
             date,
             project: project.to_string(),
-            model: message.model.clone(),
+            model,
             tokens,
             cost,
         });
