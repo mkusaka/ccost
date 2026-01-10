@@ -2,6 +2,7 @@
 
 Fast Rust reimplementation of the daily/monthly reporting parts of
 [ccusage](https://github.com/ryoppippi/ccusage) for Claude Code usage data.
+Most of the daily/monthly implementation is a direct port of ccusage into Rust.
 
 This tool focuses on:
 - Daily and monthly token/cost aggregation
@@ -102,3 +103,9 @@ cargo test
 cargo clippy -- -D warnings
 cargo fmt
 ```
+
+## Acknowledgements
+
+This project is heavily based on ccusage, and its daily/monthly logic is
+ported to Rust. Huge thanks to ryoppippi and the ccusage contributors for
+the original implementation and ongoing work.
