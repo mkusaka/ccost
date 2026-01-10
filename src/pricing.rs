@@ -49,43 +49,7 @@ pub struct UsageTokens {
 fn pricing_dataset() -> &'static HashMap<String, LiteLLMModelPricing> {
     static DATASET: OnceLock<HashMap<String, LiteLLMModelPricing>> = OnceLock::new();
     DATASET.get_or_init(|| {
-        let data = r#"
-        {
-            "claude-sonnet-4-20250514": {
-                "input_cost_per_token": 3e-6,
-                "output_cost_per_token": 1.5e-5,
-                "cache_creation_input_token_cost": 3.75e-6,
-                "cache_read_input_token_cost": 3e-7,
-                "input_cost_per_token_above_200k_tokens": 6e-6,
-                "output_cost_per_token_above_200k_tokens": 2.25e-5,
-                "cache_creation_input_token_cost_above_200k_tokens": 7.5e-6,
-                "cache_read_input_token_cost_above_200k_tokens": 6e-7,
-                "max_input_tokens": 200000
-            },
-            "claude-opus-4-20250514": {
-                "input_cost_per_token": 1.5e-5,
-                "output_cost_per_token": 7.5e-5,
-                "cache_creation_input_token_cost": 1.875e-5,
-                "cache_read_input_token_cost": 1.5e-6,
-                "input_cost_per_token_above_200k_tokens": 3e-5,
-                "output_cost_per_token_above_200k_tokens": 1.125e-4,
-                "cache_creation_input_token_cost_above_200k_tokens": 3.75e-5,
-                "cache_read_input_token_cost_above_200k_tokens": 3e-6,
-                "max_input_tokens": 200000
-            },
-            "claude-4-sonnet-20250514": {
-                "input_cost_per_token": 3e-6,
-                "output_cost_per_token": 1.5e-5,
-                "cache_creation_input_token_cost": 3.75e-6,
-                "cache_read_input_token_cost": 3e-7,
-                "input_cost_per_token_above_200k_tokens": 6e-6,
-                "output_cost_per_token_above_200k_tokens": 2.25e-5,
-                "cache_creation_input_token_cost_above_200k_tokens": 7.5e-6,
-                "cache_read_input_token_cost_above_200k_tokens": 6e-7,
-                "max_input_tokens": 200000
-            }
-        }
-        "#;
+        let data = include_str!("../assets/claude_pricing.json");
         serde_json::from_str(data).unwrap_or_default()
     })
 }

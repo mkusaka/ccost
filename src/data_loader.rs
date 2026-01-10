@@ -113,15 +113,40 @@ impl Default for TokenStats {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct Aggregate {
     input_tokens: u64,
     output_tokens: u64,
     cache_creation_tokens: u64,
     cache_read_tokens: u64,
     total_cost: f64,
-    models_used: HashSet<String>,
+    models_used: Vec<String>,
+    models_used_seen: HashSet<String>,
     model_breakdowns: HashMap<String, TokenStats>,
+}
+
+impl Default for Aggregate {
+    fn default() -> Self {
+        Self {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            total_cost: 0.0,
+            models_used: Vec::new(),
+            models_used_seen: HashSet::new(),
+            model_breakdowns: HashMap::new(),
+        }
+    }
+}
+
+impl Aggregate {
+    fn push_model(&mut self, model: &str) {
+        let owned = model.to_string();
+        if self.models_used_seen.insert(owned.clone()) {
+            self.models_used.push(owned);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -486,7 +511,7 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
 
             if let Some(model) = message.model.as_ref() {
                 if model != "<synthetic>" {
-                    entry.models_used.insert(model.clone());
+                    entry.push_model(model);
                     update_model_breakdowns(&mut entry.model_breakdowns, model, &tokens, cost);
                 }
             } else {
@@ -524,8 +549,7 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        let mut models_used = aggregate.models_used.into_iter().collect::<Vec<_>>();
-        models_used.sort();
+        let models_used = aggregate.models_used;
 
         results.push(DailyUsage {
             date,
@@ -594,7 +618,7 @@ pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>
         aggregate.cache_read_tokens += entry.cache_read_tokens;
         aggregate.total_cost += entry.total_cost;
         for model in entry.models_used {
-            aggregate.models_used.insert(model);
+            aggregate.push_model(&model);
         }
         for breakdown in entry.model_breakdowns {
             update_model_breakdowns(
@@ -638,8 +662,7 @@ pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        let mut models_used = aggregate.models_used.into_iter().collect::<Vec<_>>();
-        models_used.sort();
+        let models_used = aggregate.models_used;
 
         results.push(MonthlyUsage {
             month,
