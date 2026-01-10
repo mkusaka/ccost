@@ -315,32 +315,44 @@ where
     F: FnMut(&str, usize) -> Result<()> + Send,
 {
     let file = File::open(file_path)?;
-    let reader = BufReader::new(file);
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
+    let mut line = String::new();
     let mut line_number = 0;
-    for line in reader.lines() {
+    loop {
+        line.clear();
+        let bytes = reader.read_line(&mut line)?;
+        if bytes == 0 {
+            break;
+        }
         line_number += 1;
-        let line = line?;
-        if line.trim().is_empty() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
             continue;
         }
-        process_line(&line, line_number)?;
+        process_line(trimmed, line_number)?;
     }
     Ok(())
 }
 
 pub fn get_earliest_timestamp(file_path: &Path) -> Option<DateTime<Utc>> {
     let file = File::open(file_path).ok()?;
-    let reader = BufReader::new(file);
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
     let mut earliest: Option<DateTime<Utc>> = None;
-    for line in reader.lines() {
-        let line = match line {
-            Ok(line) => line,
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let bytes = match reader.read_line(&mut line) {
+            Ok(bytes) => bytes,
             Err(_) => continue,
         };
-        if line.trim().is_empty() {
+        if bytes == 0 {
+            break;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
             continue;
         }
-        let parsed: Result<UsageData, _> = sonic_rs::from_str(&line);
+        let parsed: Result<UsageData, _> = sonic_rs::from_str(trimmed);
         if let Ok(parsed) = parsed {
             if let Some(ts) = parsed.timestamp.as_deref() {
                 if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
