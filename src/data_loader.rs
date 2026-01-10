@@ -183,6 +183,15 @@ pub struct GlobResult {
     pub base_dir: PathBuf,
 }
 
+struct ParsedRecord {
+    unique_hash: Option<String>,
+    date: String,
+    project: String,
+    model: Option<String>,
+    tokens: UsageTokens,
+    cost: f64,
+}
+
 pub fn get_claude_paths() -> Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     let mut seen = HashSet::new();
@@ -233,6 +242,54 @@ pub fn get_claude_paths() -> Result<Vec<PathBuf>> {
     }
 
     Ok(paths)
+}
+
+fn parse_file_records(
+    file: &Path,
+    project: &str,
+    options: &LoadOptions,
+    pricing: Option<&PricingFetcher>,
+) -> Result<Vec<ParsedRecord>> {
+    let mut records = Vec::new();
+    process_jsonl_file_by_line(file, |line, _| {
+        let parsed: UsageData = match sonic_rs::from_str(line) {
+            Ok(parsed) => parsed,
+            Err(_) => return Ok(()),
+        };
+
+        let message = match parsed.message.as_ref() {
+            Some(message) => message,
+            None => return Ok(()),
+        };
+        let tokens = match extract_usage_tokens(message) {
+            Some(tokens) => tokens,
+            None => return Ok(()),
+        };
+        let timestamp = match parsed.timestamp.as_deref() {
+            Some(ts) => ts,
+            None => return Ok(()),
+        };
+
+        let date = match format_date(timestamp, options.timezone.as_deref()) {
+            Some(date) => date,
+            None => return Ok(()),
+        };
+
+        let cost = calculate_cost_for_entry(&parsed, options.mode, pricing);
+        let unique_hash = create_unique_hash(&parsed);
+
+        records.push(ParsedRecord {
+            unique_hash,
+            date,
+            project: project.to_string(),
+            model: message.model.clone(),
+            tokens,
+            cost,
+        });
+
+        Ok(())
+    })?;
+    Ok(records)
 }
 
 pub fn extract_project_from_path(path: &Path) -> String {
@@ -460,66 +517,70 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
 
     let needs_project_grouping = options.group_by_project || options.project.is_some();
 
-    for file in sorted_files {
-        let project = extract_project_from_path(&file);
-        let pricing_ref = pricing.as_ref();
-        process_jsonl_file_by_line(&file, |line, _| {
-            let parsed: UsageData = match sonic_rs::from_str(line) {
-                Ok(parsed) => parsed,
-                Err(_) => return Ok(()),
-            };
+    let pricing_ref = pricing.as_ref();
+    let file_entries = sorted_files
+        .into_iter()
+        .map(|file| {
+            let project = extract_project_from_path(&file);
+            (file, project)
+        })
+        .collect::<Vec<_>>();
 
-            let message = match parsed.message.as_ref() {
-                Some(message) => message,
-                None => return Ok(()),
-            };
-            let tokens = match extract_usage_tokens(message) {
-                Some(tokens) => tokens,
-                None => return Ok(()),
-            };
-            let timestamp = match parsed.timestamp.as_deref() {
-                Some(ts) => ts,
-                None => return Ok(()),
-            };
+    let batch_size = (rayon::current_num_threads() * 2).max(1);
 
-            let unique_hash = create_unique_hash(&parsed);
-            if let Some(hash) = &unique_hash {
-                if processed_hashes.contains(hash) {
-                    return Ok(());
+    for chunk in file_entries.chunks(batch_size) {
+        let parsed_chunks = chunk
+            .par_iter()
+            .map(|(file, project)| parse_file_records(file, project, &options, pricing_ref))
+            .collect::<Vec<_>>();
+
+        for records in parsed_chunks {
+            let records = records?;
+            for record in records {
+                if let Some(hash) = &record.unique_hash {
+                    if processed_hashes.contains(hash) {
+                        continue;
+                    }
+                    processed_hashes.insert(hash.clone());
                 }
-                processed_hashes.insert(hash.clone());
-            }
 
-            let date = match format_date(timestamp, options.timezone.as_deref()) {
-                Some(date) => date,
-                None => return Ok(()),
-            };
+                let key = if needs_project_grouping {
+                    format!(
+                        "{date}\u{0}{project}",
+                        date = record.date,
+                        project = record.project
+                    )
+                } else {
+                    record.date.clone()
+                };
 
-            let cost = calculate_cost_for_entry(&parsed, options.mode, pricing_ref);
-            let key = if needs_project_grouping {
-                format!("{date}\u{0}{project}")
-            } else {
-                date.clone()
-            };
+                let entry = aggregates.entry(key).or_default();
+                entry.input_tokens += record.tokens.input_tokens;
+                entry.output_tokens += record.tokens.output_tokens;
+                entry.cache_creation_tokens += record.tokens.cache_creation_input_tokens;
+                entry.cache_read_tokens += record.tokens.cache_read_input_tokens;
+                entry.total_cost += record.cost;
 
-            let entry = aggregates.entry(key).or_default();
-            entry.input_tokens += tokens.input_tokens;
-            entry.output_tokens += tokens.output_tokens;
-            entry.cache_creation_tokens += tokens.cache_creation_input_tokens;
-            entry.cache_read_tokens += tokens.cache_read_input_tokens;
-            entry.total_cost += cost;
-
-            if let Some(model) = message.model.as_ref() {
-                if model != "<synthetic>" {
-                    entry.push_model(model);
-                    update_model_breakdowns(&mut entry.model_breakdowns, model, &tokens, cost);
+                if let Some(model) = record.model.as_deref() {
+                    if model != "<synthetic>" {
+                        entry.push_model(model);
+                        update_model_breakdowns(
+                            &mut entry.model_breakdowns,
+                            model,
+                            &record.tokens,
+                            record.cost,
+                        );
+                    }
+                } else {
+                    update_model_breakdowns(
+                        &mut entry.model_breakdowns,
+                        "unknown",
+                        &record.tokens,
+                        record.cost,
+                    );
                 }
-            } else {
-                update_model_breakdowns(&mut entry.model_breakdowns, "unknown", &tokens, cost);
             }
-
-            Ok(())
-        })?;
+        }
     }
 
     let mut results = Vec::new();
