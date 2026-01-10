@@ -253,8 +253,8 @@ fn parse_file_records(
     pricing: Option<&PricingFetcher>,
 ) -> Result<Vec<ParsedRecord>> {
     let mut records = Vec::new();
-    process_jsonl_file_by_line(file, |line, _| {
-        let parsed: UsageData = match sonic_rs::from_str(line) {
+    process_jsonl_file_by_line_bytes(file, |line, _| {
+        let parsed: UsageData = match sonic_rs::from_slice(line) {
             Ok(parsed) => parsed,
             Err(_) => return Ok(()),
         };
@@ -336,25 +336,61 @@ where
     Ok(())
 }
 
+fn trim_ascii_whitespace(bytes: &[u8]) -> &[u8] {
+    let mut start = 0;
+    let mut end = bytes.len();
+    while start < end && bytes[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    while end > start && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    &bytes[start..end]
+}
+
+pub fn process_jsonl_file_by_line_bytes<F>(file_path: &Path, mut process_line: F) -> Result<()>
+where
+    F: FnMut(&[u8], usize) -> Result<()> + Send,
+{
+    let file = File::open(file_path)?;
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
+    let mut line = Vec::new();
+    let mut line_number = 0;
+    loop {
+        line.clear();
+        let bytes = reader.read_until(b'\n', &mut line)?;
+        if bytes == 0 {
+            break;
+        }
+        line_number += 1;
+        let trimmed = trim_ascii_whitespace(&line);
+        if trimmed.is_empty() {
+            continue;
+        }
+        process_line(trimmed, line_number)?;
+    }
+    Ok(())
+}
+
 pub fn get_earliest_timestamp(file_path: &Path) -> Option<DateTime<Utc>> {
     let file = File::open(file_path).ok()?;
     let mut reader = BufReader::with_capacity(64 * 1024, file);
     let mut earliest: Option<DateTime<Utc>> = None;
-    let mut line = String::new();
+    let mut line = Vec::new();
     loop {
         line.clear();
-        let bytes = match reader.read_line(&mut line) {
+        let bytes = match reader.read_until(b'\n', &mut line) {
             Ok(bytes) => bytes,
             Err(_) => continue,
         };
         if bytes == 0 {
             break;
         }
-        let trimmed = line.trim();
+        let trimmed = trim_ascii_whitespace(&line);
         if trimmed.is_empty() {
             continue;
         }
-        let parsed: Result<UsageData, _> = sonic_rs::from_str(trimmed);
+        let parsed: Result<UsageData, _> = sonic_rs::from_slice(trimmed);
         if let Ok(parsed) = parsed {
             if let Some(ts) = parsed.timestamp.as_deref() {
                 if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
