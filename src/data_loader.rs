@@ -61,6 +61,11 @@ struct UsageData {
     request: Option<UsageRequest>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct TimestampOnly {
+    timestamp: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ModelBreakdown {
     pub model_name: String,
@@ -397,7 +402,7 @@ pub fn get_earliest_timestamp(file_path: &Path) -> Option<DateTime<Utc>> {
         if trimmed.is_empty() {
             continue;
         }
-        let parsed: Result<UsageData, _> = sonic_rs::from_slice(trimmed);
+        let parsed: Result<TimestampOnly, _> = sonic_rs::from_slice(trimmed);
         if let Ok(parsed) = parsed {
             if let Some(ts) = parsed.timestamp.as_deref() {
                 if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
