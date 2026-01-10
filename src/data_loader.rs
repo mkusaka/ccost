@@ -192,7 +192,7 @@ type GroupKey = (String, Option<String>);
 struct ParsedRecord {
     unique_hash: Option<String>,
     date: String,
-    project: String,
+    project: Option<String>,
     model: Option<String>,
     tokens: UsageTokens,
     cost: f64,
@@ -254,6 +254,7 @@ fn parse_file_records(
     file: &Path,
     project: &str,
     timezone: Option<chrono_tz::Tz>,
+    needs_project_grouping: bool,
     options: &LoadOptions,
     pricing: Option<&PricingFetcher>,
 ) -> Result<Vec<ParsedRecord>> {
@@ -288,7 +289,11 @@ fn parse_file_records(
         records.push(ParsedRecord {
             unique_hash,
             date,
-            project: project.to_string(),
+            project: if needs_project_grouping {
+                Some(project.to_string())
+            } else {
+                None
+            },
             model,
             tokens,
             cost,
@@ -604,7 +609,14 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
         let parsed_chunks = chunk
             .par_iter()
             .map(|(file, project)| {
-                parse_file_records(file, project, parsed_timezone, &options, pricing_ref)
+                parse_file_records(
+                    file,
+                    project,
+                    parsed_timezone,
+                    needs_project_grouping,
+                    &options,
+                    pricing_ref,
+                )
             })
             .collect::<Vec<_>>();
 
@@ -625,7 +637,7 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
                     }
                 }
                 let key = if needs_project_grouping {
-                    (date, Some(project))
+                    (date, project)
                 } else {
                     (date, None)
                 };
