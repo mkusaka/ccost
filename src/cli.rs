@@ -246,7 +246,6 @@ fn run_daily(args: DailyArgs) -> Result<()> {
         }
     }
 
-    table.add_row(vec![String::new(); table.column_count()]);
     table.add_row(build_totals_row(&usage_row_from_totals(&totals), mode));
     println!("{table}");
 
@@ -301,7 +300,6 @@ fn run_monthly(args: MonthlyArgs) -> Result<()> {
         }
     }
 
-    table.add_row(vec![String::new(); table.column_count()]);
     table.add_row(build_totals_row(&usage_row_from_totals(&totals), mode));
     println!("{table}");
 
@@ -341,7 +339,7 @@ fn usage_table(first_column: &str, mode: TableMode) -> UsageTable {
     };
 
     let mut table = Table::new();
-    table.load_preset(comfy_table::presets::UTF8_FULL);
+    table.load_preset("││──╞═╪╡│─┼├┤┬┴┌┐└┘");
     table.set_header(headers);
     UsageTable { table, mode }
 }
