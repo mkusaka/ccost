@@ -403,16 +403,15 @@ pub fn get_earliest_timestamp(file_path: &Path) -> Option<DateTime<Utc>> {
             continue;
         }
         let parsed: Result<TimestampOnly, _> = sonic_rs::from_slice(trimmed);
-        if let Ok(parsed) = parsed {
-            if let Some(ts) = parsed.timestamp.as_deref() {
-                if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
-                    let utc = dt.with_timezone(&Utc);
-                    earliest = match earliest {
-                        Some(existing) if existing <= utc => Some(existing),
-                        _ => Some(utc),
-                    };
-                }
-            }
+        if let Ok(parsed) = parsed
+            && let Some(ts) = parsed.timestamp.as_deref()
+            && let Ok(dt) = DateTime::parse_from_rfc3339(ts)
+        {
+            let utc = dt.with_timezone(&Utc);
+            earliest = match earliest {
+                Some(existing) if existing <= utc => Some(existing),
+                _ => Some(utc),
+            };
         }
     }
     earliest
@@ -636,10 +635,8 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
                     tokens,
                     cost,
                 } = record;
-                if let Some(hash) = unique_hash {
-                    if !processed_hashes.insert(hash) {
-                        continue;
-                    }
+                if let Some(hash) = unique_hash && !processed_hashes.insert(hash) {
+                    continue;
                 }
                 let key = if needs_project_grouping {
                     (date, project)
