@@ -33,6 +33,12 @@ Run the binary:
 ./target/release/ccost daily
 ```
 
+Install via Cargo:
+
+```bash
+cargo install --git https://github.com/mkusaka/ccost
+```
+
 ## Usage
 
 Daily:
