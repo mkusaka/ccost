@@ -106,10 +106,14 @@ where
         .into_iter()
         .filter(|item| {
             let date_str = get_date(item).replace('-', "");
-            if let Some(since) = since && date_str.as_str() < since {
+            if let Some(since) = since
+                && date_str.as_str() < since
+            {
                 return false;
             }
-            if let Some(until) = until && date_str.as_str() > until {
+            if let Some(until) = until
+                && date_str.as_str() > until
+            {
                 return false;
             }
             true

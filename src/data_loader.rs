@@ -635,7 +635,9 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
                     tokens,
                     cost,
                 } = record;
-                if let Some(hash) = unique_hash && !processed_hashes.insert(hash) {
+                if let Some(hash) = unique_hash
+                    && !processed_hashes.insert(hash)
+                {
                     continue;
                 }
                 let key = if needs_project_grouping {
