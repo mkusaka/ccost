@@ -178,7 +178,7 @@ impl Default for LoadOptions {
             claude_path: None,
             mode: CostMode::Auto,
             order: SortOrder::Desc,
-            offline: false,
+            offline: true,
             group_by_project: false,
             project: None,
             since: None,

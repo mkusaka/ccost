@@ -49,7 +49,7 @@ pub struct CommonArgs {
     #[arg(
         short = 'O',
         long,
-        default_value_t = false,
+        default_value_t = true,
         help = "Use offline pricing data"
     )]
     offline: bool,
