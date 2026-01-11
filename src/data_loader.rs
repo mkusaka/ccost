@@ -907,7 +907,7 @@ mod tests {
     #[test]
     fn load_daily_usage_aggregates_data() {
         let fixture = create_fixture();
-        let data1 = vec![
+        let data1 = [
             json!({
                 "timestamp": "2024-01-01T10:00:00Z",
                 "message": { "usage": { "input_tokens": 100, "output_tokens": 50 } },
@@ -981,7 +981,7 @@ mod tests {
     #[test]
     fn load_daily_usage_filters_by_date_range() {
         let fixture = create_fixture();
-        let data = vec![
+        let data = [
             json!({
                 "timestamp": "2024-01-01T12:00:00Z",
                 "message": { "usage": { "input_tokens": 100, "output_tokens": 50 } },
@@ -1024,7 +1024,7 @@ mod tests {
     #[test]
     fn load_daily_usage_sorting_default_desc() {
         let fixture = create_fixture();
-        let data = vec![
+        let data = [
             json!({
                 "timestamp": "2024-01-15T12:00:00Z",
                 "message": { "usage": { "input_tokens": 200, "output_tokens": 100 } },
@@ -1066,7 +1066,7 @@ mod tests {
     #[test]
     fn load_daily_usage_sorting_asc() {
         let fixture = create_fixture();
-        let data = vec![
+        let data = [
             json!({
                 "timestamp": "2024-01-15T12:00:00Z",
                 "message": { "usage": { "input_tokens": 200, "output_tokens": 100 } },
@@ -1169,7 +1169,7 @@ mod tests {
     #[test]
     fn load_monthly_usage_aggregates_by_month() {
         let fixture = create_fixture();
-        let data = vec![
+        let data = [
             json!({
                 "timestamp": "2024-01-01T12:00:00Z",
                 "message": { "usage": { "input_tokens": 100, "output_tokens": 50 } },
@@ -1225,7 +1225,7 @@ mod tests {
     #[test]
     fn load_monthly_usage_sorts_asc_desc() {
         let fixture = create_fixture();
-        let data = vec![
+        let data = [
             json!({
                 "timestamp": "2024-01-01T12:00:00Z",
                 "message": { "usage": { "input_tokens": 100, "output_tokens": 50 } },
@@ -1282,7 +1282,7 @@ mod tests {
     #[test]
     fn load_monthly_usage_respects_date_filters() {
         let fixture = create_fixture();
-        let data = vec![
+        let data = [
             json!({
                 "timestamp": "2024-01-01T12:00:00Z",
                 "message": { "usage": { "input_tokens": 100, "output_tokens": 50 } },
@@ -1325,7 +1325,7 @@ mod tests {
     #[test]
     fn load_monthly_usage_handles_cache_tokens() {
         let fixture = create_fixture();
-        let data = vec![
+        let data = [
             json!({
                 "timestamp": "2024-01-01T12:00:00Z",
                 "message": { "usage": { "input_tokens": 100, "output_tokens": 50, "cache_creation_input_tokens": 25, "cache_read_input_tokens": 10 } },
@@ -1373,7 +1373,7 @@ mod tests {
         write_file(
             fixture.path(),
             "projects/test-project/session/usage.jsonl",
-            &format!("{}\n{}", data1, data2),
+            &format!("{data1}\n{data2}"),
         );
 
         let auto_result = load_daily_usage_data(LoadOptions {
@@ -1474,7 +1474,7 @@ mod tests {
     #[test]
     fn get_earliest_timestamp_extracts_minimum() {
         let fixture = create_fixture();
-        let content = vec![
+        let content = [
             json!({ "timestamp": "2025-01-15T12:00:00Z", "message": { "usage": {} } }),
             json!({ "timestamp": "2025-01-10T10:00:00Z", "message": { "usage": {} } }),
             json!({ "timestamp": "2025-01-12T11:00:00Z", "message": { "usage": {} } }),
@@ -1496,7 +1496,7 @@ mod tests {
     #[test]
     fn get_earliest_timestamp_handles_missing() {
         let fixture = create_fixture();
-        let content = vec![
+        let content = [
             json!({ "message": { "usage": {} } }),
             json!({ "data": "no timestamp" }),
         ]
