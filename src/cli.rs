@@ -128,7 +128,11 @@ struct ModelBreakdownOutput {
 }
 
 pub fn run() -> Result<()> {
-    let cli = Cli::parse();
+    let mut args = std::env::args_os().collect::<Vec<_>>();
+    if args.len() == 1 {
+        args.push(std::ffi::OsString::from("daily"));
+    }
+    let cli = Cli::parse_from(args);
     match cli.command {
         Command::Daily(args) => run_daily(args),
         Command::Monthly(args) => run_monthly(args),
