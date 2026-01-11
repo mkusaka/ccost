@@ -291,12 +291,7 @@ fn run_monthly(args: MonthlyArgs) -> Result<()> {
     let mut table = usage_table("Month", mode);
 
     for entry in &monthly {
-        let display_date = format_date_compact(
-            &format!("{}-01", entry.month),
-            args.common.timezone.as_deref(),
-        )
-        .unwrap_or(entry.month.clone());
-        let row = build_usage_row(&display_date, &usage_row_from_monthly(entry), mode);
+        let row = build_usage_row(&entry.month, &usage_row_from_monthly(entry), mode);
         table.add_row(row);
         if args.common.breakdown {
             let breakdowns = breakdown_rows_from_breakdowns(&entry.model_breakdowns);
