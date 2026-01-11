@@ -129,8 +129,18 @@ struct ModelBreakdownOutput {
 
 pub fn run() -> Result<()> {
     let mut args = std::env::args_os().collect::<Vec<_>>();
-    if args.len() == 1 {
-        args.push(std::ffi::OsString::from("daily"));
+    let needs_default = match args.get(1).and_then(|arg| arg.to_str()) {
+        None => true,
+        Some(arg) => {
+            if arg.starts_with('-') {
+                !matches!(arg, "-h" | "--help" | "-V" | "--version")
+            } else {
+                false
+            }
+        }
+    };
+    if needs_default {
+        args.insert(1, std::ffi::OsString::from("daily"));
     }
     let cli = Cli::parse_from(args);
     match cli.command {
