@@ -33,6 +33,14 @@ Run the binary:
 ./target/release/ccost daily
 ```
 
+Install from a local clone:
+
+```bash
+git clone https://github.com/mkusaka/ccost.git
+cd ccost
+cargo install --path . --force
+```
+
 Install via Cargo:
 
 ```bash
@@ -68,7 +76,7 @@ Common flags:
 - `--json`: JSON output
 - `--breakdown`: per-model breakdown
 - `--mode`: `auto` | `calculate` | `display`
-- `--offline`: use bundled pricing data
+- `--offline`: use bundled pricing data (default; set `--offline=false` to fetch live pricing)
 - `--order`: `asc` | `desc`
 - `--since` / `--until`: date filters in `YYYYMMDD`
 - `--timezone`: grouping timezone (e.g., `UTC`, `America/New_York`)
@@ -96,6 +104,15 @@ Cost calculation modes:
 
 When `--offline` is set, ccost uses an embedded pricing snapshot derived from
 LiteLLM’s model pricing dataset (Claude-only subset).
+
+To update the embedded snapshot:
+
+```bash
+scripts/update_offline_pricing.sh
+```
+
+A scheduled GitHub Action periodically refreshes the snapshot and opens a PR
+requesting review from `mkusaka`.
 
 ## Compatibility
 
