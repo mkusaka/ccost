@@ -29,11 +29,25 @@ jobs:
         run: bash scripts/update_offline_pricing.sh
 
       - name: Create pull request
-        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
-        with:
-          commit-message: "Update offline pricing data"
-          title: "Update offline pricing data"
-          body: "Automated update of embedded offline pricing data."
-          branch: "automation/update-offline-pricing"
-          delete-branch: true
-          reviewers: "mkusaka"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          BRANCH="automation/update-offline-pricing"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add -A
+          git commit -m "Update offline pricing data"
+          git push -f origin "$BRANCH"
+          if gh pr view "$BRANCH" --json state -q '.state' 2>/dev/null | grep -q "OPEN"; then
+            echo "PR already exists"
+          else
+            gh pr create \
+              --title "Update offline pricing data" \
+              --body "Automated update of embedded offline pricing data." \
+              --reviewer "mkusaka"
+          fi
