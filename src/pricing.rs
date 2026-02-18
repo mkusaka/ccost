@@ -83,7 +83,13 @@ impl PricingFetcher {
                 "azure/".to_string(),
                 "openrouter/openai/".to_string(),
             ],
-            model_aliases: HashMap::from([("gpt-5-codex".to_string(), "gpt-5".to_string())]),
+            model_aliases: HashMap::from([
+                ("gpt-5-codex".to_string(), "gpt-5".to_string()),
+                (
+                    "gemini-3-pro-high".to_string(),
+                    "gemini-3-pro-preview".to_string(),
+                ),
+            ]),
         }
     }
 

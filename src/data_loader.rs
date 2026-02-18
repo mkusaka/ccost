@@ -23,6 +23,10 @@ const CODEX_HOME_ENV: &str = "CODEX_HOME";
 const CODEX_SESSIONS_DIR_NAME: &str = "sessions";
 const DEFAULT_CODEX_PATH: &str = ".codex";
 const LEGACY_FALLBACK_CODEX_MODEL: &str = "gpt-5";
+const OPENCODE_DATA_DIR_ENV: &str = "OPENCODE_DATA_DIR";
+const DEFAULT_OPENCODE_PATH: &str = ".local/share/opencode";
+const OPENCODE_STORAGE_DIR_NAME: &str = "storage";
+const OPENCODE_MESSAGES_DIR_NAME: &str = "message";
 
 fn default_claude_config_path() -> PathBuf {
     if let Some(dir) = dirs::config_dir() {
@@ -39,6 +43,13 @@ fn default_codex_home_path() -> PathBuf {
         return PathBuf::from(home).join(DEFAULT_CODEX_PATH);
     }
     PathBuf::from(DEFAULT_CODEX_PATH)
+}
+
+fn default_opencode_data_path() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join(DEFAULT_OPENCODE_PATH);
+    }
+    PathBuf::from(DEFAULT_OPENCODE_PATH)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -126,6 +137,36 @@ struct CodexRawUsage {
     output_tokens: u64,
     reasoning_output_tokens: u64,
     total_tokens: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OpenCodeMessage {
+    id: Option<String>,
+    #[serde(rename = "providerID")]
+    provider_id: Option<String>,
+    #[serde(rename = "modelID")]
+    model_id: Option<String>,
+    time: Option<OpenCodeMessageTime>,
+    tokens: Option<OpenCodeTokens>,
+    cost: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OpenCodeMessageTime {
+    created: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OpenCodeTokens {
+    input: Option<u64>,
+    output: Option<u64>,
+    cache: Option<OpenCodeCacheTokens>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OpenCodeCacheTokens {
+    read: Option<u64>,
+    write: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -225,11 +266,13 @@ impl Aggregate {
 pub struct LoadOptions {
     pub claude_path: Option<PathBuf>,
     pub codex_path: Option<PathBuf>,
+    pub opencode_path: Option<PathBuf>,
     pub mode: CostMode,
     pub order: SortOrder,
     pub offline: bool,
     pub codex: bool,
     pub claudecode: bool,
+    pub opencode: bool,
     pub group_by_project: bool,
     pub project: Option<String>,
     pub since: Option<String>,
@@ -242,11 +285,13 @@ impl Default for LoadOptions {
         Self {
             claude_path: None,
             codex_path: None,
+            opencode_path: None,
             mode: CostMode::Auto,
             order: SortOrder::Desc,
             offline: true,
             codex: false,
             claudecode: true,
+            opencode: false,
             group_by_project: false,
             project: None,
             since: None,
@@ -658,6 +703,53 @@ fn glob_codex_usage_files(sessions_dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+fn resolve_opencode_messages_dir(base: PathBuf) -> Option<PathBuf> {
+    let messages = base
+        .join(OPENCODE_STORAGE_DIR_NAME)
+        .join(OPENCODE_MESSAGES_DIR_NAME);
+    if messages.is_dir() {
+        return Some(messages.canonicalize().unwrap_or(messages));
+    }
+    if base.is_dir()
+        && base
+            .file_name()
+            .map(|name| name.to_string_lossy() == OPENCODE_MESSAGES_DIR_NAME)
+            .unwrap_or(false)
+    {
+        return Some(base.canonicalize().unwrap_or(base));
+    }
+    None
+}
+
+fn opencode_messages_dir() -> Option<PathBuf> {
+    if let Ok(value) = std::env::var(OPENCODE_DATA_DIR_ENV) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return resolve_opencode_messages_dir(PathBuf::from(trimmed));
+        }
+    }
+
+    resolve_opencode_messages_dir(default_opencode_data_path())
+}
+
+fn glob_opencode_message_files(messages_dir: &Path) -> Vec<PathBuf> {
+    WalkDir::new(messages_dir)
+        .parallelism(jwalk::Parallelism::RayonNewPool(0))
+        .follow_links(true)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .map(|ext| ext == "json")
+                .unwrap_or(false)
+        })
+        .map(|entry| entry.path().to_path_buf())
+        .collect()
+}
+
 fn normalized_non_empty(value: Option<&str>) -> Option<String> {
     let value = value?;
     let trimmed = value.trim();
@@ -746,6 +838,91 @@ fn codex_usage_to_tokens(delta: &CodexRawUsage) -> UsageTokens {
         cache_creation_input_tokens: 0,
         cache_read_input_tokens: cached,
     }
+}
+
+fn extract_opencode_usage_tokens(message: &OpenCodeMessage) -> Option<UsageTokens> {
+    let tokens = message.tokens.as_ref()?;
+    let input_tokens = tokens.input.unwrap_or(0);
+    let output_tokens = tokens.output.unwrap_or(0);
+    let cache_creation_input_tokens = tokens
+        .cache
+        .as_ref()
+        .and_then(|cache| cache.write)
+        .unwrap_or(0);
+    let cache_read_input_tokens = tokens
+        .cache
+        .as_ref()
+        .and_then(|cache| cache.read)
+        .unwrap_or(0);
+
+    if input_tokens == 0
+        && output_tokens == 0
+        && cache_creation_input_tokens == 0
+        && cache_read_input_tokens == 0
+    {
+        return None;
+    }
+
+    Some(UsageTokens {
+        input_tokens,
+        output_tokens,
+        cache_creation_input_tokens,
+        cache_read_input_tokens,
+    })
+}
+
+fn calculate_cost_for_opencode_entry(
+    message: &OpenCodeMessage,
+    tokens: &UsageTokens,
+    mode: CostMode,
+    pricing: Option<&PricingFetcher>,
+) -> f64 {
+    let model = normalized_non_empty(message.model_id.as_deref());
+
+    match mode {
+        CostMode::Display => message.cost.unwrap_or(0.0),
+        CostMode::Auto => {
+            if let Some(cost) = message.cost
+                && cost > 0.0
+            {
+                return cost;
+            }
+            pricing
+                .map(|fetcher| fetcher.calculate_cost_from_tokens(tokens, model.as_deref()))
+                .unwrap_or(0.0)
+        }
+        CostMode::Calculate => pricing
+            .map(|fetcher| fetcher.calculate_cost_from_tokens(tokens, model.as_deref()))
+            .unwrap_or(0.0),
+    }
+}
+
+fn parse_opencode_message_record(
+    file: &Path,
+    timezone: Option<chrono_tz::Tz>,
+    options: &LoadOptions,
+    pricing: Option<&PricingFetcher>,
+) -> Option<ParsedRecord> {
+    let content = std::fs::read(file).ok()?;
+    let message: OpenCodeMessage = sonic_rs::from_slice(&content).ok()?;
+
+    normalized_non_empty(message.provider_id.as_deref())?;
+
+    let model = normalized_non_empty(message.model_id.as_deref())?;
+    let created = message.time.as_ref()?.created?;
+    let created_dt = DateTime::<Utc>::from_timestamp_millis(created)?;
+    let date = format_date_with_tz(&created_dt.to_rfc3339(), timezone)?;
+    let tokens = extract_opencode_usage_tokens(&message)?;
+    let cost = calculate_cost_for_opencode_entry(&message, &tokens, options.mode, pricing);
+
+    Some(ParsedRecord {
+        unique_hash: normalized_non_empty(message.id.as_deref()),
+        date,
+        project: None,
+        model: Some(model),
+        tokens,
+        cost,
+    })
 }
 
 fn aggregate_usage_record(
@@ -1080,6 +1257,96 @@ fn load_codex_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
     ))
 }
 
+fn load_opencode_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>> {
+    if options.project.is_some() {
+        return Ok(Vec::new());
+    }
+
+    let parsed_timezone = match options.timezone.as_deref() {
+        Some(tz_str) => Tz::from_str(tz_str).ok(),
+        None => None,
+    };
+    if options.timezone.is_some() && parsed_timezone.is_none() {
+        return Ok(Vec::new());
+    }
+
+    let messages_dir = if let Some(path) = &options.opencode_path {
+        if path.is_dir() {
+            path.clone()
+        } else {
+            return Ok(Vec::new());
+        }
+    } else {
+        match opencode_messages_dir() {
+            Some(path) => path,
+            None => return Ok(Vec::new()),
+        }
+    };
+
+    let files = glob_opencode_message_files(&messages_dir);
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let pricing = if matches!(options.mode, CostMode::Display) {
+        None
+    } else {
+        Some(PricingFetcher::new())
+    };
+
+    let pricing_ref = pricing.as_ref();
+    let parsed_records = files
+        .par_iter()
+        .filter_map(|file| {
+            parse_opencode_message_record(file, parsed_timezone, options, pricing_ref)
+        })
+        .collect::<Vec<_>>();
+
+    let needs_project_grouping = options.group_by_project;
+    let mut processed_hashes = HashSet::new();
+    let mut aggregates: HashMap<GroupKey, Aggregate> = HashMap::new();
+
+    for record in parsed_records {
+        let ParsedRecord {
+            unique_hash,
+            date,
+            project,
+            model,
+            tokens,
+            cost,
+        } = record;
+
+        if let Some(hash) = unique_hash
+            && !processed_hashes.insert(hash)
+        {
+            continue;
+        }
+
+        aggregate_usage_record(
+            &mut aggregates,
+            date,
+            project,
+            needs_project_grouping,
+            model.as_deref(),
+            &tokens,
+            cost,
+        );
+    }
+
+    let filtered = filter_by_date_range(
+        aggregates_to_daily_usage(aggregates),
+        |item| item.date.as_str(),
+        options.since.as_deref(),
+        options.until.as_deref(),
+    );
+
+    Ok(sort_by_date(
+        filtered,
+        |item| item.date.as_str(),
+        options.order,
+    ))
+}
+
 fn merge_daily_usage(entries: Vec<DailyUsage>, order: SortOrder) -> Vec<DailyUsage> {
     let mut aggregates: HashMap<(String, Option<String>), Aggregate> = HashMap::new();
 
@@ -1153,6 +1420,9 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
     }
     if options.codex {
         all_entries.extend(load_codex_daily_usage_data(&options)?);
+    }
+    if options.opencode {
+        all_entries.extend(load_opencode_daily_usage_data(&options)?);
     }
 
     if all_entries.is_empty() {
@@ -2434,5 +2704,134 @@ mod tests {
                 .any(|m| m == "claude-sonnet-4-20250514")
         );
         assert!(result[0].models_used.iter().any(|m| m == "gpt-5-codex"));
+    }
+
+    #[test]
+    fn load_daily_usage_supports_opencode_messages() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "opencode/storage/message/ses_1/msg_1.json",
+            &json!({
+                "id": "msg_1",
+                "sessionID": "ses_1",
+                "providerID": "opencode",
+                "modelID": "gpt-5",
+                "time": {
+                    "created": 1736505000000_i64
+                },
+                "tokens": {
+                    "input": 300,
+                    "output": 120,
+                    "cache": {
+                        "read": 40,
+                        "write": 10
+                    }
+                },
+                "cost": 0.0123
+            })
+            .to_string(),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            claudecode: false,
+            codex: false,
+            opencode: true,
+            opencode_path: Some(
+                fixture
+                    .path()
+                    .join("opencode")
+                    .join("storage")
+                    .join("message"),
+            ),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Auto,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].date, "2025-01-10");
+        assert_eq!(result[0].input_tokens, 300);
+        assert_eq!(result[0].output_tokens, 120);
+        assert_eq!(result[0].cache_creation_tokens, 10);
+        assert_eq!(result[0].cache_read_tokens, 40);
+        assert_eq!(result[0].total_cost, 0.0123);
+        assert!(result[0].models_used.iter().any(|m| m == "gpt-5"));
+    }
+
+    #[test]
+    fn load_daily_usage_merges_claude_and_opencode() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "claude/projects/project1/session1/usage.jsonl",
+            &json!({
+                "timestamp": "2025-01-10T12:00:00Z",
+                "message": {
+                    "model": "claude-sonnet-4-20250514",
+                    "usage": { "input_tokens": 100, "output_tokens": 50 }
+                },
+                "costUSD": 0.01,
+                "requestId": "req-1"
+            })
+            .to_string(),
+        );
+        write_file(
+            fixture.path(),
+            "opencode/storage/message/ses_1/msg_1.json",
+            &json!({
+                "id": "msg_1",
+                "sessionID": "ses_1",
+                "providerID": "opencode",
+                "modelID": "gpt-5",
+                "time": {
+                    "created": 1736512200000_i64
+                },
+                "tokens": {
+                    "input": 200,
+                    "output": 100,
+                    "cache": {
+                        "read": 10,
+                        "write": 5
+                    }
+                },
+                "cost": 0.02
+            })
+            .to_string(),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            claudecode: true,
+            codex: false,
+            opencode: true,
+            claude_path: Some(fixture.path().join("claude")),
+            opencode_path: Some(
+                fixture
+                    .path()
+                    .join("opencode")
+                    .join("storage")
+                    .join("message"),
+            ),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Auto,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].date, "2025-01-10");
+        assert_eq!(result[0].input_tokens, 300);
+        assert_eq!(result[0].output_tokens, 150);
+        assert_eq!(result[0].cache_creation_tokens, 5);
+        assert_eq!(result[0].cache_read_tokens, 10);
+        assert_eq!(result[0].total_cost, 0.03);
+        assert!(
+            result[0]
+                .models_used
+                .iter()
+                .any(|m| m == "claude-sonnet-4-20250514")
+        );
+        assert!(result[0].models_used.iter().any(|m| m == "gpt-5"));
     }
 }

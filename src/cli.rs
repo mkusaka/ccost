@@ -19,7 +19,7 @@ use terminal_size::terminal_size;
 #[command(
     name = "ccost",
     version,
-    about = "Claude Code / Codex usage report (daily/monthly)"
+    about = "Claude Code / Codex / OpenCode usage report (daily/monthly)"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -71,6 +71,13 @@ pub struct CommonArgs {
         help = "Include Claude Code usage data"
     )]
     claudecode: bool,
+    #[arg(
+        long,
+        default_value_t = true,
+        action = clap::ArgAction::Set,
+        help = "Include OpenCode usage data"
+    )]
+    opencode: bool,
 }
 
 #[derive(Args, Clone)]
@@ -182,6 +189,7 @@ fn common_options(args: &CommonArgs) -> Result<LoadOptions> {
         offline: args.offline,
         codex: args.codex,
         claudecode: args.claudecode,
+        opencode: args.opencode,
         since: args.since.clone(),
         until: args.until.clone(),
         timezone: args.timezone.clone(),
@@ -354,11 +362,20 @@ fn table_mode(force_compact: bool) -> TableMode {
 }
 
 fn report_title(period: &str, args: &CommonArgs) -> String {
-    let source = match (args.claudecode, args.codex) {
-        (true, true) => "Claude Code + Codex",
-        (true, false) => "Claude Code",
-        (false, true) => "Codex",
-        (false, false) => "No Source",
+    let mut sources = Vec::new();
+    if args.claudecode {
+        sources.push("Claude Code");
+    }
+    if args.codex {
+        sources.push("Codex");
+    }
+    if args.opencode {
+        sources.push("OpenCode");
+    }
+    let source = if sources.is_empty() {
+        "No Source".to_string()
+    } else {
+        sources.join(" + ")
     };
     format!("{source} Token Usage Report - {period}")
 }

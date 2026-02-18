@@ -1,7 +1,7 @@
 # ccost
 
 Fast Rust reimplementation of the daily/monthly reporting parts of
-[ccusage](https://github.com/ryoppippi/ccusage) for Claude Code + Codex usage data.
+[ccusage](https://github.com/ryoppippi/ccusage) for Claude Code + Codex + OpenCode usage data.
 Most of the daily/monthly implementation is a direct port of ccusage into Rust.
 
 This tool focuses on:
@@ -17,7 +17,7 @@ Everything else from ccusage is out of scope for now.
 - JSON and table output
 - Per-model breakdowns
 - Project/instance grouping for daily
-- Claude Code and Codex source aggregation
+- Claude Code, Codex, and OpenCode source aggregation
 - Offline pricing data bundled at build time (Claude + Codex)
 
 ## Install
@@ -80,13 +80,14 @@ Common flags:
 - `--offline`: use bundled pricing data (default; set `--offline=false` to fetch live pricing)
 - `--codex`: include Codex usage data (default `true`, set `--codex=false` to disable)
 - `--claudecode`: include Claude Code usage data (default `true`, set `--claudecode=false` to disable)
+- `--opencode`: include OpenCode usage data (default `true`, set `--opencode=false` to disable)
 - `--order`: `asc` | `desc`
 - `--since` / `--until`: date filters in `YYYYMMDD`
 - `--timezone`: grouping timezone (e.g., `UTC`, `America/New_York`)
 
 ## Data discovery
 
-ccost looks for usage data from both Claude Code and Codex.
+ccost looks for usage data from Claude Code, Codex, and OpenCode.
 
 Claude Code default locations (checked in order):
 - `$XDG_CONFIG_HOME/claude` or `~/.config/claude`
@@ -100,6 +101,9 @@ export CLAUDE_CONFIG_DIR="$HOME/.claude,$HOME/.config/claude"
 
 Codex default location:
 - `${CODEX_HOME:-~/.codex}/sessions`
+
+OpenCode default location:
+- `${OPENCODE_DATA_DIR:-~/.local/share/opencode}/storage/message`
 
 ## Pricing
 
