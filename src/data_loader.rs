@@ -19,6 +19,10 @@ use std::sync::Arc;
 const CLAUDE_CONFIG_DIR_ENV: &str = "CLAUDE_CONFIG_DIR";
 const CLAUDE_PROJECTS_DIR_NAME: &str = "projects";
 const DEFAULT_CLAUDE_CODE_PATH: &str = ".claude";
+const CODEX_HOME_ENV: &str = "CODEX_HOME";
+const CODEX_SESSIONS_DIR_NAME: &str = "sessions";
+const DEFAULT_CODEX_PATH: &str = ".codex";
+const LEGACY_FALLBACK_CODEX_MODEL: &str = "gpt-5";
 
 fn default_claude_config_path() -> PathBuf {
     if let Some(dir) = dirs::config_dir() {
@@ -28,6 +32,13 @@ fn default_claude_config_path() -> PathBuf {
         return PathBuf::from(home).join(".config/claude");
     }
     PathBuf::from(".config/claude")
+}
+
+fn default_codex_home_path() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join(DEFAULT_CODEX_PATH);
+    }
+    PathBuf::from(DEFAULT_CODEX_PATH)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -64,6 +75,57 @@ struct UsageData {
 #[derive(Debug, Clone, Deserialize)]
 struct TimestampOnly {
     timestamp: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CodexEntry {
+    timestamp: Option<String>,
+    #[serde(rename = "type")]
+    entry_type: Option<String>,
+    payload: Option<CodexPayload>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CodexPayload {
+    #[serde(rename = "type")]
+    payload_type: Option<String>,
+    info: Option<CodexTokenInfo>,
+    model: Option<String>,
+    model_name: Option<String>,
+    metadata: Option<CodexMetadata>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CodexTokenInfo {
+    model: Option<String>,
+    model_name: Option<String>,
+    metadata: Option<CodexMetadata>,
+    last_token_usage: Option<CodexTokenUsage>,
+    total_token_usage: Option<CodexTokenUsage>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CodexMetadata {
+    model: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CodexTokenUsage {
+    input_tokens: Option<u64>,
+    cached_input_tokens: Option<u64>,
+    cache_read_input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    reasoning_output_tokens: Option<u64>,
+    total_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct CodexRawUsage {
+    input_tokens: u64,
+    cached_input_tokens: u64,
+    output_tokens: u64,
+    reasoning_output_tokens: u64,
+    total_tokens: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -162,9 +224,12 @@ impl Aggregate {
 #[derive(Debug, Clone)]
 pub struct LoadOptions {
     pub claude_path: Option<PathBuf>,
+    pub codex_path: Option<PathBuf>,
     pub mode: CostMode,
     pub order: SortOrder,
     pub offline: bool,
+    pub codex: bool,
+    pub claudecode: bool,
     pub group_by_project: bool,
     pub project: Option<String>,
     pub since: Option<String>,
@@ -176,9 +241,12 @@ impl Default for LoadOptions {
     fn default() -> Self {
         Self {
             claude_path: None,
+            codex_path: None,
             mode: CostMode::Auto,
             order: SortOrder::Desc,
             offline: true,
+            codex: false,
+            claudecode: true,
             group_by_project: false,
             project: None,
             since: None,
@@ -553,13 +621,204 @@ fn calculate_cost_for_entry(
     }
 }
 
-pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
-    let claude_paths = if let Some(path) = &options.claude_path {
-        vec![path.clone()]
+fn codex_sessions_dir() -> Option<PathBuf> {
+    if let Ok(value) = std::env::var(CODEX_HOME_ENV) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let dir = PathBuf::from(trimmed).join(CODEX_SESSIONS_DIR_NAME);
+            if dir.is_dir() {
+                return Some(dir.canonicalize().unwrap_or(dir));
+            }
+            return None;
+        }
+    }
+
+    let dir = default_codex_home_path().join(CODEX_SESSIONS_DIR_NAME);
+    if dir.is_dir() {
+        return Some(dir.canonicalize().unwrap_or(dir));
+    }
+    None
+}
+
+fn glob_codex_usage_files(sessions_dir: &Path) -> Vec<PathBuf> {
+    WalkDir::new(sessions_dir)
+        .parallelism(jwalk::Parallelism::RayonNewPool(0))
+        .follow_links(true)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .map(|ext| ext == "jsonl")
+                .unwrap_or(false)
+        })
+        .map(|entry| entry.path().to_path_buf())
+        .collect()
+}
+
+fn normalized_non_empty(value: Option<&str>) -> Option<String> {
+    let value = value?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
     } else {
-        get_claude_paths()?
+        Some(trimmed.to_string())
+    }
+}
+
+fn extract_codex_model_from_info(info: &CodexTokenInfo) -> Option<String> {
+    normalized_non_empty(info.model.as_deref())
+        .or_else(|| normalized_non_empty(info.model_name.as_deref()))
+        .or_else(|| {
+            info.metadata
+                .as_ref()
+                .and_then(|metadata| normalized_non_empty(metadata.model.as_deref()))
+        })
+}
+
+fn extract_codex_model(payload: &CodexPayload) -> Option<String> {
+    normalized_non_empty(payload.model.as_deref())
+        .or_else(|| normalized_non_empty(payload.model_name.as_deref()))
+        .or_else(|| {
+            payload
+                .metadata
+                .as_ref()
+                .and_then(|metadata| normalized_non_empty(metadata.model.as_deref()))
+        })
+        .or_else(|| {
+            payload
+                .info
+                .as_ref()
+                .and_then(extract_codex_model_from_info)
+        })
+}
+
+fn normalize_codex_usage(usage: &CodexTokenUsage) -> CodexRawUsage {
+    let input = usage.input_tokens.unwrap_or(0);
+    let cached = usage
+        .cached_input_tokens
+        .or(usage.cache_read_input_tokens)
+        .unwrap_or(0);
+    let output = usage.output_tokens.unwrap_or(0);
+    let reasoning = usage.reasoning_output_tokens.unwrap_or(0);
+    let total = usage
+        .total_tokens
+        .unwrap_or_else(|| input.saturating_add(output));
+    CodexRawUsage {
+        input_tokens: input,
+        cached_input_tokens: cached,
+        output_tokens: output,
+        reasoning_output_tokens: reasoning,
+        total_tokens: if total > 0 {
+            total
+        } else {
+            input.saturating_add(output)
+        },
+    }
+}
+
+fn subtract_codex_usage(
+    current: &CodexRawUsage,
+    previous: Option<&CodexRawUsage>,
+) -> CodexRawUsage {
+    let previous = previous.cloned().unwrap_or_default();
+    CodexRawUsage {
+        input_tokens: current.input_tokens.saturating_sub(previous.input_tokens),
+        cached_input_tokens: current
+            .cached_input_tokens
+            .saturating_sub(previous.cached_input_tokens),
+        output_tokens: current.output_tokens.saturating_sub(previous.output_tokens),
+        reasoning_output_tokens: current
+            .reasoning_output_tokens
+            .saturating_sub(previous.reasoning_output_tokens),
+        total_tokens: current.total_tokens.saturating_sub(previous.total_tokens),
+    }
+}
+
+fn codex_usage_to_tokens(delta: &CodexRawUsage) -> UsageTokens {
+    let cached = delta.cached_input_tokens.min(delta.input_tokens);
+    let input = delta.input_tokens.saturating_sub(cached);
+    UsageTokens {
+        input_tokens: input,
+        output_tokens: delta.output_tokens,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: cached,
+    }
+}
+
+fn aggregate_usage_record(
+    aggregates: &mut HashMap<GroupKey, Aggregate>,
+    date: String,
+    project: Option<Arc<str>>,
+    needs_project_grouping: bool,
+    model: Option<&str>,
+    tokens: &UsageTokens,
+    cost: f64,
+) {
+    let key = if needs_project_grouping {
+        (date, project)
+    } else {
+        (date, None)
     };
 
+    let entry = aggregates.entry(key).or_default();
+    entry.input_tokens += tokens.input_tokens;
+    entry.output_tokens += tokens.output_tokens;
+    entry.cache_creation_tokens += tokens.cache_creation_input_tokens;
+    entry.cache_read_tokens += tokens.cache_read_input_tokens;
+    entry.total_cost += cost;
+
+    if let Some(model) = model {
+        if model != "<synthetic>" {
+            entry.push_model(model);
+            update_model_breakdowns(&mut entry.model_breakdowns, model, tokens, cost);
+        }
+    } else {
+        update_model_breakdowns(&mut entry.model_breakdowns, "unknown", tokens, cost);
+    }
+}
+
+fn aggregates_to_daily_usage(aggregates: HashMap<GroupKey, Aggregate>) -> Vec<DailyUsage> {
+    let mut results = Vec::new();
+    for ((date, project), aggregate) in aggregates {
+        let project = project.map(|value| value.to_string());
+        let mut model_breakdowns = aggregate
+            .model_breakdowns
+            .into_iter()
+            .filter(|(name, _)| name != "<synthetic>")
+            .map(|(model_name, stats)| ModelBreakdown {
+                model_name,
+                input_tokens: stats.input_tokens,
+                output_tokens: stats.output_tokens,
+                cache_creation_tokens: stats.cache_creation_tokens,
+                cache_read_tokens: stats.cache_read_tokens,
+                cost: stats.cost,
+            })
+            .collect::<Vec<_>>();
+        model_breakdowns.sort_by(|a, b| {
+            b.cost
+                .partial_cmp(&a.cost)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        results.push(DailyUsage {
+            date,
+            input_tokens: aggregate.input_tokens,
+            output_tokens: aggregate.output_tokens,
+            cache_creation_tokens: aggregate.cache_creation_tokens,
+            cache_read_tokens: aggregate.cache_read_tokens,
+            total_cost: aggregate.total_cost,
+            models_used: aggregate.models_used,
+            model_breakdowns,
+            project,
+        });
+    }
+    results
+}
+
+fn load_claude_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>> {
     let parsed_timezone = match options.timezone.as_deref() {
         Some(tz_str) => Tz::from_str(tz_str).ok(),
         None => None,
@@ -567,6 +826,15 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
     if options.timezone.is_some() && parsed_timezone.is_none() {
         return Ok(Vec::new());
     }
+
+    let claude_paths = if let Some(path) = &options.claude_path {
+        vec![path.clone()]
+    } else {
+        match get_claude_paths() {
+            Ok(paths) => paths,
+            Err(_) => return Ok(Vec::new()),
+        }
+    };
 
     let all_files = glob_usage_files(&claude_paths);
     if all_files.is_empty() {
@@ -592,7 +860,6 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
 
     let mut processed_hashes = HashSet::new();
     let mut aggregates: HashMap<GroupKey, Aggregate> = HashMap::new();
-
     let needs_project_grouping = options.group_by_project || options.project.is_some();
 
     let pricing_ref = pricing.as_ref();
@@ -614,13 +881,7 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
         let parsed_chunks = chunk
             .par_iter()
             .map(|(file, project)| {
-                parse_file_records(
-                    file,
-                    project.clone(),
-                    parsed_timezone,
-                    &options,
-                    pricing_ref,
-                )
+                parse_file_records(file, project.clone(), parsed_timezone, options, pricing_ref)
             })
             .collect::<Vec<_>>();
 
@@ -635,39 +896,221 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
                     tokens,
                     cost,
                 } = record;
+
                 if let Some(hash) = unique_hash
                     && !processed_hashes.insert(hash)
                 {
                     continue;
                 }
-                let key = if needs_project_grouping {
-                    (date, project)
-                } else {
-                    (date, None)
-                };
-
-                let entry = aggregates.entry(key).or_default();
-                entry.input_tokens += tokens.input_tokens;
-                entry.output_tokens += tokens.output_tokens;
-                entry.cache_creation_tokens += tokens.cache_creation_input_tokens;
-                entry.cache_read_tokens += tokens.cache_read_input_tokens;
-                entry.total_cost += cost;
-
-                if let Some(model) = model.as_deref() {
-                    if model != "<synthetic>" {
-                        entry.push_model(model);
-                        update_model_breakdowns(&mut entry.model_breakdowns, model, &tokens, cost);
-                    }
-                } else {
-                    update_model_breakdowns(&mut entry.model_breakdowns, "unknown", &tokens, cost);
-                }
+                aggregate_usage_record(
+                    &mut aggregates,
+                    date,
+                    project,
+                    needs_project_grouping,
+                    model.as_deref(),
+                    &tokens,
+                    cost,
+                );
             }
+        }
+    }
+
+    let filtered = filter_by_date_range(
+        aggregates_to_daily_usage(aggregates),
+        |item| item.date.as_str(),
+        options.since.as_deref(),
+        options.until.as_deref(),
+    );
+
+    let mut final_results = if let Some(project) = &options.project {
+        filtered
+            .into_iter()
+            .filter(|item| item.project.as_deref() == Some(project))
+            .collect::<Vec<_>>()
+    } else {
+        filtered
+    };
+
+    final_results = sort_by_date(final_results, |item| item.date.as_str(), options.order);
+    Ok(final_results)
+}
+
+fn load_codex_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>> {
+    if options.project.is_some() {
+        return Ok(Vec::new());
+    }
+
+    let parsed_timezone = match options.timezone.as_deref() {
+        Some(tz_str) => Tz::from_str(tz_str).ok(),
+        None => None,
+    };
+    if options.timezone.is_some() && parsed_timezone.is_none() {
+        return Ok(Vec::new());
+    }
+
+    let sessions_dir = if let Some(path) = &options.codex_path {
+        if path.is_dir() {
+            path.clone()
+        } else {
+            return Ok(Vec::new());
+        }
+    } else {
+        match codex_sessions_dir() {
+            Some(path) => path,
+            None => return Ok(Vec::new()),
+        }
+    };
+
+    let files = glob_codex_usage_files(&sessions_dir);
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let sorted_files = sort_files_by_timestamp(files);
+    let pricing = if matches!(options.mode, CostMode::Display) {
+        None
+    } else {
+        Some(PricingFetcher::new())
+    };
+    let mut aggregates: HashMap<GroupKey, Aggregate> = HashMap::new();
+    let needs_project_grouping = options.group_by_project;
+
+    for file in sorted_files {
+        let mut previous_totals: Option<CodexRawUsage> = None;
+        let mut current_model: Option<String> = None;
+
+        process_jsonl_file_by_line_bytes(&file, |line, _| {
+            let parsed: CodexEntry = match sonic_rs::from_slice(line) {
+                Ok(parsed) => parsed,
+                Err(_) => return Ok(()),
+            };
+
+            let payload = match parsed.payload.as_ref() {
+                Some(payload) => payload,
+                None => return Ok(()),
+            };
+
+            let entry_type = parsed.entry_type.as_deref().unwrap_or_default();
+            if entry_type == "turn_context" {
+                if let Some(model) = extract_codex_model(payload) {
+                    current_model = Some(model);
+                }
+                return Ok(());
+            }
+            if entry_type != "event_msg" {
+                return Ok(());
+            }
+            if payload.payload_type.as_deref() != Some("token_count") {
+                return Ok(());
+            }
+
+            let timestamp = match parsed.timestamp.as_deref() {
+                Some(ts) => ts,
+                None => return Ok(()),
+            };
+            let date = match format_date_with_tz(timestamp, parsed_timezone) {
+                Some(date) => date,
+                None => return Ok(()),
+            };
+
+            let info = match payload.info.as_ref() {
+                Some(info) => info,
+                None => return Ok(()),
+            };
+            let last_usage = info.last_token_usage.as_ref().map(normalize_codex_usage);
+            let total_usage = info.total_token_usage.as_ref().map(normalize_codex_usage);
+
+            let raw_usage = match (last_usage, total_usage.clone()) {
+                (Some(last), _) => last,
+                (None, Some(total)) => subtract_codex_usage(&total, previous_totals.as_ref()),
+                (None, None) => return Ok(()),
+            };
+
+            if let Some(total) = total_usage {
+                previous_totals = Some(total);
+            }
+
+            if raw_usage.input_tokens == 0
+                && raw_usage.cached_input_tokens == 0
+                && raw_usage.output_tokens == 0
+                && raw_usage.reasoning_output_tokens == 0
+            {
+                return Ok(());
+            }
+
+            if let Some(model) = extract_codex_model(payload) {
+                current_model = Some(model);
+            }
+            let model = current_model
+                .clone()
+                .unwrap_or_else(|| LEGACY_FALLBACK_CODEX_MODEL.to_string());
+            let tokens = codex_usage_to_tokens(&raw_usage);
+            let cost = match options.mode {
+                CostMode::Display => 0.0,
+                CostMode::Calculate | CostMode::Auto => pricing
+                    .as_ref()
+                    .map(|fetcher| fetcher.calculate_cost_from_tokens(&tokens, Some(&model)))
+                    .unwrap_or(0.0),
+            };
+
+            aggregate_usage_record(
+                &mut aggregates,
+                date,
+                None,
+                needs_project_grouping,
+                Some(model.as_str()),
+                &tokens,
+                cost,
+            );
+
+            Ok(())
+        })?;
+    }
+
+    let filtered = filter_by_date_range(
+        aggregates_to_daily_usage(aggregates),
+        |item| item.date.as_str(),
+        options.since.as_deref(),
+        options.until.as_deref(),
+    );
+    Ok(sort_by_date(
+        filtered,
+        |item| item.date.as_str(),
+        options.order,
+    ))
+}
+
+fn merge_daily_usage(entries: Vec<DailyUsage>, order: SortOrder) -> Vec<DailyUsage> {
+    let mut aggregates: HashMap<(String, Option<String>), Aggregate> = HashMap::new();
+
+    for entry in entries {
+        let key = (entry.date.clone(), entry.project.clone());
+        let aggregate = aggregates.entry(key).or_default();
+        aggregate.input_tokens += entry.input_tokens;
+        aggregate.output_tokens += entry.output_tokens;
+        aggregate.cache_creation_tokens += entry.cache_creation_tokens;
+        aggregate.cache_read_tokens += entry.cache_read_tokens;
+        aggregate.total_cost += entry.total_cost;
+        for model in entry.models_used {
+            aggregate.push_model(&model);
+        }
+        for breakdown in entry.model_breakdowns {
+            update_model_breakdowns(
+                &mut aggregate.model_breakdowns,
+                &breakdown.model_name,
+                &UsageTokens {
+                    input_tokens: breakdown.input_tokens,
+                    output_tokens: breakdown.output_tokens,
+                    cache_creation_input_tokens: breakdown.cache_creation_tokens,
+                    cache_read_input_tokens: breakdown.cache_read_tokens,
+                },
+                breakdown.cost,
+            );
         }
     }
 
     let mut results = Vec::new();
     for ((date, project), aggregate) in aggregates {
-        let project = project.map(|value| value.to_string());
         let mut model_breakdowns = aggregate
             .model_breakdowns
             .into_iter()
@@ -686,9 +1129,6 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
                 .partial_cmp(&a.cost)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-
-        let models_used = aggregate.models_used;
-
         results.push(DailyUsage {
             date,
             input_tokens: aggregate.input_tokens,
@@ -696,31 +1136,29 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
             cache_creation_tokens: aggregate.cache_creation_tokens,
             cache_read_tokens: aggregate.cache_read_tokens,
             total_cost: aggregate.total_cost,
-            models_used,
+            models_used: aggregate.models_used,
             model_breakdowns,
             project,
         });
     }
 
-    let filtered = filter_by_date_range(
-        results,
-        |item| item.date.as_str(),
-        options.since.as_deref(),
-        options.until.as_deref(),
-    );
+    sort_by_date(results, |item| item.date.as_str(), order)
+}
 
-    let mut final_results = if let Some(project) = &options.project {
-        filtered
-            .into_iter()
-            .filter(|item| item.project.as_deref() == Some(project))
-            .collect::<Vec<_>>()
-    } else {
-        filtered
-    };
+pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
+    let mut all_entries = Vec::new();
 
-    final_results = sort_by_date(final_results, |item| item.date.as_str(), options.order);
+    if options.claudecode {
+        all_entries.extend(load_claude_daily_usage_data(&options)?);
+    }
+    if options.codex {
+        all_entries.extend(load_codex_daily_usage_data(&options)?);
+    }
 
-    Ok(final_results)
+    if all_entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(merge_daily_usage(all_entries, options.order))
 }
 
 pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>> {
@@ -1845,5 +2283,156 @@ mod tests {
         unsafe {
             std::env::remove_var(CLAUDE_CONFIG_DIR_ENV);
         }
+    }
+
+    #[test]
+    fn load_daily_usage_supports_codex_logs() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "sessions/session-1.jsonl",
+            &[
+                json!({
+                    "timestamp": "2025-01-10T10:00:00Z",
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5-codex" }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2025-01-10T10:00:01Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 1200,
+                                "cached_input_tokens": 200,
+                                "output_tokens": 300,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 1500
+                            },
+                            "total_token_usage": {
+                                "input_tokens": 1200,
+                                "cached_input_tokens": 200,
+                                "output_tokens": 300,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 1500
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2025-01-10T10:00:02Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": {
+                                "input_tokens": 2000,
+                                "cached_input_tokens": 500,
+                                "output_tokens": 600,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 2600
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            codex: true,
+            claudecode: false,
+            codex_path: Some(fixture.path().join("sessions")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Calculate,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].date, "2025-01-10");
+        assert_eq!(result[0].input_tokens, 1500);
+        assert_eq!(result[0].cache_read_tokens, 500);
+        assert_eq!(result[0].output_tokens, 600);
+        assert!(result[0].total_cost > 0.0);
+        assert!(result[0].models_used.iter().any(|m| m == "gpt-5-codex"));
+    }
+
+    #[test]
+    fn load_daily_usage_merges_claude_and_codex() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "claude/projects/project1/session1/usage.jsonl",
+            &json!({
+                "timestamp": "2025-01-10T12:00:00Z",
+                "message": {
+                    "model": "claude-sonnet-4-20250514",
+                    "usage": { "input_tokens": 100, "output_tokens": 50 }
+                },
+                "costUSD": 0.01,
+                "requestId": "req-1"
+            })
+            .to_string(),
+        );
+        write_file(
+            fixture.path(),
+            "codex/sessions/session-1.jsonl",
+            &[
+                json!({
+                    "timestamp": "2025-01-10T12:30:00Z",
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5-codex" }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2025-01-10T12:30:01Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 1000,
+                                "cached_input_tokens": 100,
+                                "output_tokens": 200,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 1200
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            claudecode: true,
+            codex: true,
+            claude_path: Some(fixture.path().join("claude")),
+            codex_path: Some(fixture.path().join("codex").join("sessions")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Auto,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].date, "2025-01-10");
+        assert_eq!(result[0].input_tokens, 1000);
+        assert_eq!(result[0].output_tokens, 250);
+        assert_eq!(result[0].cache_read_tokens, 100);
+        assert!(result[0].total_cost > 0.01);
+        assert!(
+            result[0]
+                .models_used
+                .iter()
+                .any(|m| m == "claude-sonnet-4-20250514")
+        );
+        assert!(result[0].models_used.iter().any(|m| m == "gpt-5-codex"));
     }
 }

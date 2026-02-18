@@ -19,7 +19,7 @@ use terminal_size::terminal_size;
 #[command(
     name = "ccost",
     version,
-    about = "Claude Code usage report (daily/monthly)"
+    about = "Claude Code / Codex usage report (daily/monthly)"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -57,6 +57,20 @@ pub struct CommonArgs {
     timezone: Option<String>,
     #[arg(long, default_value_t = false, help = "Force compact mode")]
     compact: bool,
+    #[arg(
+        long,
+        default_value_t = true,
+        action = clap::ArgAction::Set,
+        help = "Include Codex usage data"
+    )]
+    codex: bool,
+    #[arg(
+        long,
+        default_value_t = true,
+        action = clap::ArgAction::Set,
+        help = "Include Claude Code usage data"
+    )]
+    claudecode: bool,
 }
 
 #[derive(Args, Clone)]
@@ -166,6 +180,8 @@ fn common_options(args: &CommonArgs) -> Result<LoadOptions> {
         mode: parse_cost_mode(&args.mode)?,
         order: parse_sort_order(&args.order)?,
         offline: args.offline,
+        codex: args.codex,
+        claudecode: args.claudecode,
         since: args.since.clone(),
         until: args.until.clone(),
         timezone: args.timezone.clone(),
@@ -183,7 +199,7 @@ fn run_daily(args: DailyArgs) -> Result<()> {
         if args.common.json {
             println!("[]");
         } else {
-            eprintln!("No Claude usage data found.");
+            eprintln!("No usage data found.");
         }
         return Ok(());
     }
@@ -216,7 +232,7 @@ fn run_daily(args: DailyArgs) -> Result<()> {
         return Ok(());
     }
 
-    println!("Claude Code Token Usage Report - Daily");
+    println!("{}", report_title("Daily", &args.common));
 
     let mode = table_mode(args.common.compact);
     let mut table = usage_table("Date", mode);
@@ -282,7 +298,7 @@ fn run_monthly(args: MonthlyArgs) -> Result<()> {
             });
             println!("{}", serde_json::to_string_pretty(&empty)?);
         } else {
-            eprintln!("No Claude usage data found.");
+            eprintln!("No usage data found.");
         }
         return Ok(());
     }
@@ -298,7 +314,7 @@ fn run_monthly(args: MonthlyArgs) -> Result<()> {
         return Ok(());
     }
 
-    println!("Claude Code Token Usage Report - Monthly");
+    println!("{}", report_title("Monthly", &args.common));
 
     let mode = table_mode(args.common.compact);
     let mut table = usage_table("Month", mode);
@@ -335,6 +351,16 @@ fn table_mode(force_compact: bool) -> TableMode {
     } else {
         TableMode::Full
     }
+}
+
+fn report_title(period: &str, args: &CommonArgs) -> String {
+    let source = match (args.claudecode, args.codex) {
+        (true, true) => "Claude Code + Codex",
+        (true, false) => "Claude Code",
+        (false, true) => "Codex",
+        (false, false) => "No Source",
+    };
+    format!("{source} Token Usage Report - {period}")
 }
 
 fn usage_table(first_column: &str, mode: TableMode) -> UsageTable {

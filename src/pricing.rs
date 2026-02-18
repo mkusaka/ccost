@@ -49,13 +49,20 @@ pub struct UsageTokens {
 fn pricing_dataset() -> &'static HashMap<String, LiteLLMModelPricing> {
     static DATASET: OnceLock<HashMap<String, LiteLLMModelPricing>> = OnceLock::new();
     DATASET.get_or_init(|| {
-        let data = include_str!("../assets/claude_pricing.json");
-        serde_json::from_str(data).unwrap_or_default()
+        let claude = include_str!("../assets/claude_pricing.json");
+        let codex = include_str!("../assets/codex_pricing.json");
+        let mut merged: HashMap<String, LiteLLMModelPricing> =
+            serde_json::from_str(claude).unwrap_or_default();
+        let codex_entries: HashMap<String, LiteLLMModelPricing> =
+            serde_json::from_str(codex).unwrap_or_default();
+        merged.extend(codex_entries);
+        merged
     })
 }
 
 pub struct PricingFetcher {
     provider_prefixes: Vec<String>,
+    model_aliases: HashMap<String, String>,
 }
 
 impl Default for PricingFetcher {
@@ -72,8 +79,11 @@ impl PricingFetcher {
                 "claude-3-5-".to_string(),
                 "claude-3-".to_string(),
                 "claude-".to_string(),
+                "openai/".to_string(),
+                "azure/".to_string(),
                 "openrouter/openai/".to_string(),
             ],
+            model_aliases: HashMap::from([("gpt-5-codex".to_string(), "gpt-5".to_string())]),
         }
     }
 
@@ -88,9 +98,16 @@ impl PricingFetcher {
 
     pub fn get_model_pricing(&self, model_name: &str) -> Option<LiteLLMModelPricing> {
         let pricing = pricing_dataset();
-        for candidate in self.candidate_names(model_name) {
-            if let Some(found) = pricing.get(&candidate) {
-                return Some(found.clone());
+        let mut names = vec![model_name.to_string()];
+        if let Some(alias) = self.model_aliases.get(model_name) {
+            names.push(alias.clone());
+        }
+
+        for name in names {
+            for candidate in self.candidate_names(&name) {
+                if let Some(found) = pricing.get(&candidate) {
+                    return Some(found.clone());
+                }
             }
         }
 
@@ -200,6 +217,19 @@ mod tests {
             cache_read_input_tokens: 100,
         };
         let cost = fetcher.calculate_cost_from_tokens(&tokens, Some("claude-sonnet-4-20250514"));
+        assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn calculate_cost_from_tokens_supports_codex_models() {
+        let fetcher = PricingFetcher::new();
+        let tokens = UsageTokens {
+            input_tokens: 1000,
+            output_tokens: 500,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 100,
+        };
+        let cost = fetcher.calculate_cost_from_tokens(&tokens, Some("gpt-5-codex"));
         assert!(cost > 0.0);
     }
 }
