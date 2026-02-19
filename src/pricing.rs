@@ -83,7 +83,47 @@ impl PricingFetcher {
                 "azure/".to_string(),
                 "openrouter/openai/".to_string(),
             ],
-            model_aliases: HashMap::from([("gpt-5-codex".to_string(), "gpt-5".to_string())]),
+            model_aliases: HashMap::from([
+                ("gpt-5-codex".to_string(), "gpt-5".to_string()),
+                ("claude-opus-4.5".to_string(), "claude-opus-4-5".to_string()),
+                (
+                    "claude-sonnet-4.5".to_string(),
+                    "claude-sonnet-4-5".to_string(),
+                ),
+                (
+                    "claude-haiku-4.5".to_string(),
+                    "claude-haiku-4-5".to_string(),
+                ),
+                (
+                    "claude-opus-4".to_string(),
+                    "claude-opus-4-20250514".to_string(),
+                ),
+                ("claude-opus-41".to_string(), "claude-opus-4-1".to_string()),
+                (
+                    "claude-sonnet-4".to_string(),
+                    "claude-sonnet-4-20250514".to_string(),
+                ),
+                (
+                    "claude-3.5-sonnet".to_string(),
+                    "claude-3-5-sonnet-latest".to_string(),
+                ),
+                (
+                    "claude-3.7-sonnet".to_string(),
+                    "claude-3-7-sonnet-latest".to_string(),
+                ),
+                (
+                    "claude-3.7-sonnet-thought".to_string(),
+                    "claude-3-7-sonnet-latest".to_string(),
+                ),
+                (
+                    "grok-code-fast-1".to_string(),
+                    "xai/grok-code-fast-1".to_string(),
+                ),
+                (
+                    "gemini-3-pro-high".to_string(),
+                    "gemini-3-pro-preview".to_string(),
+                ),
+            ]),
         }
     }
 
@@ -230,6 +270,19 @@ mod tests {
             cache_read_input_tokens: 100,
         };
         let cost = fetcher.calculate_cost_from_tokens(&tokens, Some("gpt-5-codex"));
+        assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn calculate_cost_from_tokens_supports_github_copilot_claude_alias() {
+        let fetcher = PricingFetcher::new();
+        let tokens = UsageTokens {
+            input_tokens: 1000,
+            output_tokens: 500,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        };
+        let cost = fetcher.calculate_cost_from_tokens(&tokens, Some("claude-opus-4.5"));
         assert!(cost > 0.0);
     }
 }
