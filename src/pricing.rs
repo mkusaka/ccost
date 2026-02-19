@@ -90,7 +90,10 @@ impl PricingFetcher {
                     "claude-sonnet-4.5".to_string(),
                     "claude-sonnet-4-5".to_string(),
                 ),
-                ("claude-haiku-4.5".to_string(), "claude-haiku-4-5".to_string()),
+                (
+                    "claude-haiku-4.5".to_string(),
+                    "claude-haiku-4-5".to_string(),
+                ),
                 (
                     "claude-opus-4".to_string(),
                     "claude-opus-4-20250514".to_string(),
@@ -112,7 +115,10 @@ impl PricingFetcher {
                     "claude-3.7-sonnet-thought".to_string(),
                     "claude-3-7-sonnet-latest".to_string(),
                 ),
-                ("grok-code-fast-1".to_string(), "xai/grok-code-fast-1".to_string()),
+                (
+                    "grok-code-fast-1".to_string(),
+                    "xai/grok-code-fast-1".to_string(),
+                ),
                 (
                     "gemini-3-pro-high".to_string(),
                     "gemini-3-pro-preview".to_string(),
