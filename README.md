@@ -103,7 +103,8 @@ Codex default location:
 - `${CODEX_HOME:-~/.codex}/sessions`
 
 OpenCode default location:
-- `${OPENCODE_DATA_DIR:-~/.local/share/opencode}/storage/message`
+- `${OPENCODE_DATA_DIR:-~/.local/share/opencode}/opencode.db` (OpenCode >= 1.2.2)
+- `${OPENCODE_DATA_DIR:-~/.local/share/opencode}/storage/message` (legacy fallback)
 
 ## Pricing
 

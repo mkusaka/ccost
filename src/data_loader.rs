@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use jwalk::WalkDir;
 use rayon::prelude::*;
+use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -27,6 +28,7 @@ const OPENCODE_DATA_DIR_ENV: &str = "OPENCODE_DATA_DIR";
 const DEFAULT_OPENCODE_PATH: &str = ".local/share/opencode";
 const OPENCODE_STORAGE_DIR_NAME: &str = "storage";
 const OPENCODE_MESSAGES_DIR_NAME: &str = "message";
+const OPENCODE_DB_FILENAME: &str = "opencode.db";
 
 fn default_claude_config_path() -> PathBuf {
     if let Some(dir) = dirs::config_dir() {
@@ -142,6 +144,7 @@ struct CodexRawUsage {
 #[derive(Debug, Clone, Deserialize)]
 struct OpenCodeMessage {
     id: Option<String>,
+    role: Option<String>,
     #[serde(rename = "providerID")]
     provider_id: Option<String>,
     #[serde(rename = "modelID")]
@@ -703,33 +706,76 @@ fn glob_codex_usage_files(sessions_dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn resolve_opencode_messages_dir(base: PathBuf) -> Option<PathBuf> {
-    let messages = base
-        .join(OPENCODE_STORAGE_DIR_NAME)
-        .join(OPENCODE_MESSAGES_DIR_NAME);
-    if messages.is_dir() {
-        return Some(messages.canonicalize().unwrap_or(messages));
+fn opencode_base_dir() -> Option<PathBuf> {
+    if let Ok(value) = std::env::var(OPENCODE_DATA_DIR_ENV) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let path = PathBuf::from(trimmed);
+            if path.is_dir() {
+                return Some(path.canonicalize().unwrap_or(path));
+            }
+        }
     }
-    if base.is_dir()
+
+    let default_path = default_opencode_data_path();
+    if default_path.is_dir() {
+        return Some(default_path.canonicalize().unwrap_or(default_path));
+    }
+
+    None
+}
+
+fn resolve_opencode_db_path(base: PathBuf) -> Option<PathBuf> {
+    if base.is_file()
         && base
             .file_name()
-            .map(|name| name.to_string_lossy() == OPENCODE_MESSAGES_DIR_NAME)
+            .map(|name| name.to_string_lossy() == OPENCODE_DB_FILENAME)
             .unwrap_or(false)
     {
         return Some(base.canonicalize().unwrap_or(base));
     }
-    None
-}
 
-fn opencode_messages_dir() -> Option<PathBuf> {
-    if let Ok(value) = std::env::var(OPENCODE_DATA_DIR_ENV) {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return resolve_opencode_messages_dir(PathBuf::from(trimmed));
+    if base.is_dir() {
+        let db = base.join(OPENCODE_DB_FILENAME);
+        if db.is_file() {
+            return Some(db.canonicalize().unwrap_or(db));
         }
     }
 
-    resolve_opencode_messages_dir(default_opencode_data_path())
+    None
+}
+
+fn resolve_opencode_messages_dir(base: PathBuf) -> Option<PathBuf> {
+    if !base.is_dir() {
+        return None;
+    }
+
+    if base
+        .file_name()
+        .map(|name| name.to_string_lossy() == OPENCODE_MESSAGES_DIR_NAME)
+        .unwrap_or(false)
+    {
+        return Some(base.canonicalize().unwrap_or(base));
+    }
+
+    let direct = base.join(OPENCODE_MESSAGES_DIR_NAME);
+    if direct.is_dir()
+        && base
+            .file_name()
+            .map(|name| name.to_string_lossy() == OPENCODE_STORAGE_DIR_NAME)
+            .unwrap_or(false)
+    {
+        return Some(direct.canonicalize().unwrap_or(direct));
+    }
+
+    let nested = base
+        .join(OPENCODE_STORAGE_DIR_NAME)
+        .join(OPENCODE_MESSAGES_DIR_NAME);
+    if nested.is_dir() {
+        return Some(nested.canonicalize().unwrap_or(nested));
+    }
+
+    None
 }
 
 fn glob_opencode_message_files(messages_dir: &Path) -> Vec<PathBuf> {
@@ -871,6 +917,42 @@ fn extract_opencode_usage_tokens(message: &OpenCodeMessage) -> Option<UsageToken
     })
 }
 
+fn parse_opencode_message(
+    message: OpenCodeMessage,
+    unique_hash: Option<String>,
+    created_override: Option<i64>,
+    require_assistant_role: bool,
+    timezone: Option<chrono_tz::Tz>,
+    options: &LoadOptions,
+    pricing: Option<&PricingFetcher>,
+) -> Option<ParsedRecord> {
+    if require_assistant_role && message.role.as_deref() != Some("assistant") {
+        return None;
+    }
+
+    normalized_non_empty(message.provider_id.as_deref())?;
+
+    let model = normalized_non_empty(message.model_id.as_deref())?;
+    let created = message
+        .time
+        .as_ref()
+        .and_then(|time| time.created)
+        .or(created_override)?;
+    let created_dt = DateTime::<Utc>::from_timestamp_millis(created)?;
+    let date = format_date_with_tz(&created_dt.to_rfc3339(), timezone)?;
+    let tokens = extract_opencode_usage_tokens(&message)?;
+    let cost = calculate_cost_for_opencode_entry(&message, &tokens, options.mode, pricing);
+
+    Some(ParsedRecord {
+        unique_hash: unique_hash.or_else(|| normalized_non_empty(message.id.as_deref())),
+        date,
+        project: None,
+        model: Some(model),
+        tokens,
+        cost,
+    })
+}
+
 fn calculate_cost_for_opencode_entry(
     message: &OpenCodeMessage,
     tokens: &UsageTokens,
@@ -905,24 +987,76 @@ fn parse_opencode_message_record(
 ) -> Option<ParsedRecord> {
     let content = std::fs::read(file).ok()?;
     let message: OpenCodeMessage = sonic_rs::from_slice(&content).ok()?;
+    parse_opencode_message(message, None, None, false, timezone, options, pricing)
+}
 
-    normalized_non_empty(message.provider_id.as_deref())?;
+fn parse_opencode_sqlite_row(
+    row_id: Option<String>,
+    time_created: Option<i64>,
+    data: &str,
+    timezone: Option<chrono_tz::Tz>,
+    options: &LoadOptions,
+    pricing: Option<&PricingFetcher>,
+) -> Option<ParsedRecord> {
+    let message: OpenCodeMessage = sonic_rs::from_str(data).ok()?;
+    parse_opencode_message(
+        message,
+        normalized_non_empty(row_id.as_deref()),
+        time_created,
+        true,
+        timezone,
+        options,
+        pricing,
+    )
+}
 
-    let model = normalized_non_empty(message.model_id.as_deref())?;
-    let created = message.time.as_ref()?.created?;
-    let created_dt = DateTime::<Utc>::from_timestamp_millis(created)?;
-    let date = format_date_with_tz(&created_dt.to_rfc3339(), timezone)?;
-    let tokens = extract_opencode_usage_tokens(&message)?;
-    let cost = calculate_cost_for_opencode_entry(&message, &tokens, options.mode, pricing);
+fn load_opencode_sqlite_records(
+    db_path: &Path,
+    timezone: Option<chrono_tz::Tz>,
+    options: &LoadOptions,
+    pricing: Option<&PricingFetcher>,
+) -> Result<Vec<ParsedRecord>> {
+    let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| anyhow!("failed to open OpenCode sqlite database: {error}"))?;
+    let mut statement = connection
+        .prepare("SELECT id, time_created, data FROM message")
+        .map_err(|error| anyhow!("failed to query OpenCode sqlite database: {error}"))?;
 
-    Some(ParsedRecord {
-        unique_hash: normalized_non_empty(message.id.as_deref()),
-        date,
-        project: None,
-        model: Some(model),
-        tokens,
-        cost,
-    })
+    let mut rows = statement
+        .query([])
+        .map_err(|error| anyhow!("failed to read OpenCode sqlite rows: {error}"))?;
+
+    let mut parsed_records = Vec::new();
+    while let Some(row) = rows
+        .next()
+        .map_err(|error| anyhow!("failed to iterate OpenCode sqlite rows: {error}"))?
+    {
+        let row_id = row.get::<_, Option<String>>(0).ok().flatten();
+        let time_created = row.get::<_, Option<i64>>(1).ok().flatten();
+        let data = row.get::<_, String>(2).ok();
+
+        if let Some(data) = data
+            && let Some(record) =
+                parse_opencode_sqlite_row(row_id, time_created, &data, timezone, options, pricing)
+        {
+            parsed_records.push(record);
+        }
+    }
+
+    Ok(parsed_records)
+}
+
+fn load_opencode_json_records(
+    messages_dir: &Path,
+    timezone: Option<chrono_tz::Tz>,
+    options: &LoadOptions,
+    pricing: Option<&PricingFetcher>,
+) -> Vec<ParsedRecord> {
+    let files = glob_opencode_message_files(messages_dir);
+    files
+        .par_iter()
+        .filter_map(|file| parse_opencode_message_record(file, timezone, options, pricing))
+        .collect::<Vec<_>>()
 }
 
 fn aggregate_usage_record(
@@ -1270,23 +1404,18 @@ fn load_opencode_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsag
         return Ok(Vec::new());
     }
 
-    let messages_dir = if let Some(path) = &options.opencode_path {
-        if path.is_dir() {
+    let base_path = if let Some(path) = &options.opencode_path {
+        if path.exists() {
             path.clone()
         } else {
             return Ok(Vec::new());
         }
     } else {
-        match opencode_messages_dir() {
+        match opencode_base_dir() {
             Some(path) => path,
             None => return Ok(Vec::new()),
         }
     };
-
-    let files = glob_opencode_message_files(&messages_dir);
-    if files.is_empty() {
-        return Ok(Vec::new());
-    }
 
     let pricing = if matches!(options.mode, CostMode::Display) {
         None
@@ -1295,12 +1424,28 @@ fn load_opencode_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsag
     };
 
     let pricing_ref = pricing.as_ref();
-    let parsed_records = files
-        .par_iter()
-        .filter_map(|file| {
-            parse_opencode_message_record(file, parsed_timezone, options, pricing_ref)
-        })
-        .collect::<Vec<_>>();
+    let parsed_records = if let Some(db_path) = resolve_opencode_db_path(base_path.clone()) {
+        match load_opencode_sqlite_records(&db_path, parsed_timezone, options, pricing_ref) {
+            Ok(records) => records,
+            Err(_) => match resolve_opencode_messages_dir(base_path.clone()) {
+                Some(messages_dir) => {
+                    load_opencode_json_records(&messages_dir, parsed_timezone, options, pricing_ref)
+                }
+                None => Vec::new(),
+            },
+        }
+    } else {
+        match resolve_opencode_messages_dir(base_path) {
+            Some(messages_dir) => {
+                load_opencode_json_records(&messages_dir, parsed_timezone, options, pricing_ref)
+            }
+            None => Vec::new(),
+        }
+    };
+
+    if parsed_records.is_empty() {
+        return Ok(Vec::new());
+    }
 
     let needs_project_grouping = options.group_by_project;
     let mut processed_hashes = HashSet::new();
@@ -1583,6 +1728,7 @@ pub fn group_daily_by_project(data: &[DailyUsage]) -> HashMap<String, Vec<DailyU
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::{Connection, params};
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -1596,6 +1742,30 @@ mod tests {
 
     fn create_fixture() -> TempDir {
         TempDir::new().unwrap()
+    }
+
+    fn write_opencode_sqlite_messages(base: &Path, rows: &[(&str, i64, serde_json::Value)]) {
+        let db_path = base.join("opencode.db");
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+
+        let connection = Connection::open(db_path).unwrap();
+        connection
+            .execute(
+                "CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER, data TEXT)",
+                [],
+            )
+            .unwrap();
+
+        for (id, time_created, data) in rows {
+            connection
+                .execute(
+                    "INSERT INTO message (id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4)",
+                    params![id, "ses_1", time_created, data.to_string()],
+                )
+                .unwrap();
+        }
     }
 
     #[test]
@@ -2744,6 +2914,126 @@ mod tests {
                     .join("storage")
                     .join("message"),
             ),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Auto,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].date, "2025-01-10");
+        assert_eq!(result[0].input_tokens, 300);
+        assert_eq!(result[0].output_tokens, 120);
+        assert_eq!(result[0].cache_creation_tokens, 10);
+        assert_eq!(result[0].cache_read_tokens, 40);
+        assert_eq!(result[0].total_cost, 0.0123);
+        assert!(result[0].models_used.iter().any(|m| m == "gpt-5"));
+    }
+
+    #[test]
+    fn load_daily_usage_supports_opencode_sqlite() {
+        let fixture = create_fixture();
+        let opencode_path = fixture.path().join("opencode");
+        write_opencode_sqlite_messages(
+            &opencode_path,
+            &[
+                (
+                    "msg_1",
+                    1736505000000_i64,
+                    json!({
+                        "id": "msg_1",
+                        "role": "assistant",
+                        "providerID": "opencode",
+                        "modelID": "gpt-5",
+                        "time": {
+                            "created": 1736505000000_i64
+                        },
+                        "tokens": {
+                            "input": 300,
+                            "output": 120,
+                            "cache": {
+                                "read": 40,
+                                "write": 10
+                            }
+                        },
+                        "cost": 0.0123
+                    }),
+                ),
+                (
+                    "msg_2",
+                    1736505001000_i64,
+                    json!({
+                        "id": "msg_2",
+                        "role": "user",
+                        "providerID": "opencode",
+                        "modelID": "gpt-5",
+                        "time": {
+                            "created": 1736505001000_i64
+                        },
+                        "tokens": {
+                            "input": 1000,
+                            "output": 500
+                        },
+                        "cost": 1.0
+                    }),
+                ),
+            ],
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            claudecode: false,
+            codex: false,
+            opencode: true,
+            opencode_path: Some(opencode_path),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Auto,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].date, "2025-01-10");
+        assert_eq!(result[0].input_tokens, 300);
+        assert_eq!(result[0].output_tokens, 120);
+        assert_eq!(result[0].cache_creation_tokens, 10);
+        assert_eq!(result[0].cache_read_tokens, 40);
+        assert_eq!(result[0].total_cost, 0.0123);
+        assert!(result[0].models_used.iter().any(|m| m == "gpt-5"));
+    }
+
+    #[test]
+    fn load_daily_usage_falls_back_to_legacy_opencode_json_when_sqlite_fails() {
+        let fixture = create_fixture();
+        write_file(fixture.path(), "opencode/opencode.db", "not-a-sqlite-db");
+        write_file(
+            fixture.path(),
+            "opencode/storage/message/ses_1/msg_1.json",
+            &json!({
+                "id": "msg_1",
+                "sessionID": "ses_1",
+                "providerID": "opencode",
+                "modelID": "gpt-5",
+                "time": {
+                    "created": 1736505000000_i64
+                },
+                "tokens": {
+                    "input": 300,
+                    "output": 120,
+                    "cache": {
+                        "read": 40,
+                        "write": 10
+                    }
+                },
+                "cost": 0.0123
+            })
+            .to_string(),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            claudecode: false,
+            codex: false,
+            opencode: true,
+            opencode_path: Some(fixture.path().join("opencode")),
             timezone: Some("UTC".to_string()),
             mode: CostMode::Auto,
             ..LoadOptions::default()
