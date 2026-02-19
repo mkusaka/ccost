@@ -114,7 +114,7 @@ Cost calculation modes:
 - `display`: always use `costUSD`
 
 When `--offline` is set, ccost uses embedded pricing snapshots derived from
-LiteLLM’s model pricing dataset (Claude and Codex subsets).
+LiteLLM’s model pricing dataset (Claude, GPT-5, Gemini 3 Pro, and Kimi K2.5 subsets).
 
 To update the embedded snapshot:
 
