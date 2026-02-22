@@ -36,7 +36,21 @@ def write_filtered(output_path: str, prefixes: tuple[str, ...]) -> int:
     return len(sorted_items)
 
 claude_prefixes = ("claude-", "anthropic.claude-", "anthropic/claude-")
-codex_prefixes = ("gpt-5", "openai/gpt-5", "azure/gpt-5", "openrouter/openai/gpt-5")
+codex_prefixes = (
+    "gpt-5",
+    "openai/gpt-5",
+    "azure/gpt-5",
+    "openrouter/openai/gpt-5",
+    "gemini-3-pro",
+    "gemini/gemini-3-pro",
+    "openrouter/google/gemini-3-pro",
+    "vertex_ai/gemini-3-pro",
+    "gmi/google/gemini-3-pro",
+    "azure_ai/kimi-k2.5",
+    "openrouter/moonshotai/kimi-k2.5",
+    "moonshot/kimi-k2.5",
+    "moonshotai.kimi-k2.5",
+)
 
 claude_count = write_filtered(claude_output, claude_prefixes)
 codex_count = write_filtered(codex_output, codex_prefixes)

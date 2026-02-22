@@ -85,6 +85,7 @@ impl PricingFetcher {
             ],
             model_aliases: HashMap::from([
                 ("gpt-5-codex".to_string(), "gpt-5".to_string()),
+                ("gpt-5.3-codex".to_string(), "gpt-5".to_string()),
                 ("claude-opus-4.5".to_string(), "claude-opus-4-5".to_string()),
                 (
                     "claude-sonnet-4.5".to_string(),
@@ -123,6 +124,44 @@ impl PricingFetcher {
                     "gemini-3-pro-high".to_string(),
                     "gemini-3-pro-preview".to_string(),
                 ),
+                (
+                    "gemini-3-pro".to_string(),
+                    "gemini-3-pro-preview".to_string(),
+                ),
+                (
+                    "kimi-k2.5".to_string(),
+                    "openrouter/moonshotai/kimi-k2.5".to_string(),
+                ),
+                ("opus-4.5".to_string(), "claude-opus-4-5".to_string()),
+                ("sonnet-4.5".to_string(), "claude-sonnet-4-5".to_string()),
+                (
+                    "opus-4-1-20250805".to_string(),
+                    "claude-opus-4-1-20250805".to_string(),
+                ),
+                (
+                    "opus-4-5-20251101".to_string(),
+                    "claude-opus-4-5-20251101".to_string(),
+                ),
+                ("opus-4-6".to_string(), "claude-opus-4-6".to_string()),
+                (
+                    "sonnet-4-5-20250929".to_string(),
+                    "claude-sonnet-4-5-20250929".to_string(),
+                ),
+                (
+                    "opus-4-20250514".to_string(),
+                    "claude-opus-4-20250514".to_string(),
+                ),
+                ("opus-4-5".to_string(), "claude-opus-4-5".to_string()),
+                (
+                    "haiku-4-5-20251001".to_string(),
+                    "claude-haiku-4-5-20251001".to_string(),
+                ),
+                (
+                    "sonnet-4-20250514".to_string(),
+                    "claude-sonnet-4-20250514".to_string(),
+                ),
+                ("sonnet-4-6".to_string(), "claude-sonnet-4-6".to_string()),
+                ("sonnet-4-5".to_string(), "claude-sonnet-4-5".to_string()),
             ]),
         }
     }
@@ -284,5 +323,33 @@ mod tests {
         };
         let cost = fetcher.calculate_cost_from_tokens(&tokens, Some("claude-opus-4.5"));
         assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn calculate_cost_from_tokens_supports_opencode_short_claude_names() {
+        let fetcher = PricingFetcher::new();
+        let tokens = UsageTokens {
+            input_tokens: 1000,
+            output_tokens: 500,
+            cache_creation_input_tokens: 50,
+            cache_read_input_tokens: 100,
+        };
+        let cost = fetcher.calculate_cost_from_tokens(&tokens, Some("opus-4-6"));
+        assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn calculate_cost_from_tokens_supports_kimi_and_gemini_aliases() {
+        let fetcher = PricingFetcher::new();
+        let tokens = UsageTokens {
+            input_tokens: 1000,
+            output_tokens: 500,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 100,
+        };
+        let gemini_cost = fetcher.calculate_cost_from_tokens(&tokens, Some("gemini-3-pro"));
+        let kimi_cost = fetcher.calculate_cost_from_tokens(&tokens, Some("kimi-k2.5"));
+        assert!(gemini_cost > 0.0);
+        assert!(kimi_cost > 0.0);
     }
 }
