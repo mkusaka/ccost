@@ -928,7 +928,11 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "tool_use_system_prompt_tokens": 346
+    "tool_use_system_prompt_tokens": 346,
+    "provider_specific_entry": {
+      "us": 1.1,
+      "fast": 6.0
+    }
   },
   "claude-opus-4-6-20260205": {
     "cache_creation_input_token_cost": 6.25e-06,
@@ -959,7 +963,11 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "tool_use_system_prompt_tokens": 346
+    "tool_use_system_prompt_tokens": 346,
+    "provider_specific_entry": {
+      "us": 1.1,
+      "fast": 6.0
+    }
   },
   "claude-sonnet-4-20250514": {
     "deprecation_date": "2026-05-14",
