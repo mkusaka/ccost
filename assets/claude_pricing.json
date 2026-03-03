@@ -115,7 +115,9 @@
     "supports_pdf_input": true,
     "supports_response_schema": true,
     "supports_tool_choice": true,
-    "supports_vision": true
+    "supports_vision": true,
+    "cache_read_input_token_cost": 2.5e-08,
+    "cache_creation_input_token_cost": 3.125e-07
   },
   "anthropic.claude-3-opus-20240229-v1:0": {
     "input_cost_per_token": 1.5e-05,
@@ -128,7 +130,9 @@
     "supports_function_calling": true,
     "supports_response_schema": true,
     "supports_tool_choice": true,
-    "supports_vision": true
+    "supports_vision": true,
+    "cache_read_input_token_cost": 1.5e-06,
+    "cache_creation_input_token_cost": 1.875e-05
   },
   "anthropic.claude-3-sonnet-20240229-v1:0": {
     "input_cost_per_token": 3e-06,
@@ -142,7 +146,9 @@
     "supports_pdf_input": true,
     "supports_response_schema": true,
     "supports_tool_choice": true,
-    "supports_vision": true
+    "supports_vision": true,
+    "cache_read_input_token_cost": 3e-07,
+    "cache_creation_input_token_cost": 3.75e-06
   },
   "anthropic.claude-haiku-4-5-20251001-v1:0": {
     "cache_creation_input_token_cost": 1.25e-06,
