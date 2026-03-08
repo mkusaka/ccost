@@ -346,7 +346,8 @@
     "supports_response_schema": true,
     "supports_system_messages": true,
     "supports_tool_choice": true,
-    "supports_vision": true
+    "supports_vision": true,
+    "supports_none_reasoning_effort": true
   },
   "azure/gpt-5.1-2025-11-13": {
     "cache_read_input_token_cost": 1.25e-07,
@@ -382,7 +383,8 @@
     "supports_system_messages": true,
     "supports_tool_choice": true,
     "supports_service_tier": true,
-    "supports_vision": true
+    "supports_vision": true,
+    "supports_none_reasoning_effort": true
   },
   "azure/gpt-5.1-chat": {
     "cache_read_input_token_cost": 1.25e-07,
@@ -415,7 +417,8 @@
     "supports_response_schema": true,
     "supports_system_messages": true,
     "supports_tool_choice": true,
-    "supports_vision": true
+    "supports_vision": true,
+    "supports_none_reasoning_effort": true
   },
   "azure/gpt-5.1-chat-2025-11-13": {
     "cache_read_input_token_cost": 1.25e-07,
@@ -450,7 +453,8 @@
     "supports_response_schema": true,
     "supports_system_messages": true,
     "supports_tool_choice": false,
-    "supports_vision": true
+    "supports_vision": true,
+    "supports_none_reasoning_effort": true
   },
   "azure/gpt-5.1-codex": {
     "cache_read_input_token_cost": 1.25e-07,
