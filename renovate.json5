@@ -5,7 +5,7 @@
     {
       "matchManagers": ["cargo"],
       "matchDepTypes": ["dependencies", "build-dependencies", "workspace.dependencies"],
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": ["minor", "patch", "pin"],
       "groupName": "cargo non-major runtime dependencies",
       "automerge": true,
       "automergeType": "pr",
@@ -14,7 +14,7 @@
     {
       "matchManagers": ["cargo"],
       "matchDepTypes": ["dev-dependencies"],
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": ["minor", "patch", "pin"],
       "groupName": "cargo non-major development dependencies",
       "automerge": true,
       "automergeType": "pr",
