@@ -170,7 +170,8 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "tool_use_system_prompt_tokens": 346
+    "tool_use_system_prompt_tokens": 346,
+    "supports_native_structured_output": true
   },
   "anthropic.claude-haiku-4-5@20251001": {
     "cache_creation_input_token_cost": 1.25e-06,
@@ -193,7 +194,8 @@
     "supports_tool_choice": true,
     "supports_vision": true,
     "tool_use_system_prompt_tokens": 346,
-    "supports_native_streaming": true
+    "supports_native_streaming": true,
+    "supports_native_structured_output": true
   },
   "anthropic.claude-instant-v1": {
     "input_cost_per_token": 8e-07,
@@ -281,7 +283,8 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "tool_use_system_prompt_tokens": 159
+    "tool_use_system_prompt_tokens": 159,
+    "supports_native_structured_output": true
   },
   "anthropic.claude-opus-4-6-v1": {
     "cache_creation_input_token_cost": 6.25e-06,
@@ -307,7 +310,8 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "tool_use_system_prompt_tokens": 346
+    "tool_use_system_prompt_tokens": 346,
+    "supports_native_structured_output": true
   },
   "anthropic.claude-sonnet-4-20250514-v1:0": {
     "cache_creation_input_token_cost": 3.75e-06,
@@ -367,7 +371,8 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "tool_use_system_prompt_tokens": 159
+    "tool_use_system_prompt_tokens": 159,
+    "supports_native_structured_output": true
   },
   "anthropic.claude-sonnet-4-6": {
     "cache_creation_input_token_cost": 3.75e-06,
@@ -393,7 +398,8 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "tool_use_system_prompt_tokens": 346
+    "tool_use_system_prompt_tokens": 346,
+    "supports_native_structured_output": true
   },
   "anthropic.claude-v1": {
     "input_cost_per_token": 8e-06,
