@@ -181,7 +181,7 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" "$BOTTLE_FILE" --clobber
 
       - name: Upload bottle metadata
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: bottle-metadata-${{ matrix.bottle_tag }}
           path: bottle-metadata-${{ matrix.bottle_tag }}.json
@@ -192,7 +192,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download bottle metadata
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: bottle-metadata-*
           merge-multiple: true
