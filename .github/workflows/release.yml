@@ -153,6 +153,7 @@ jobs:
         env:
           BOTTLE_TAG: ${{ matrix.bottle_tag }}
           HOMEBREW_NO_INSTALL_FROM_API: "1"
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
           HOMEBREW_NO_AUTO_UPDATE=1 brew install --build-bottle mkusaka/tap/ccost
           HOMEBREW_NO_AUTO_UPDATE=1 brew bottle --no-rebuild --root-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" mkusaka/tap/ccost
@@ -164,15 +165,20 @@ jobs:
           fi
 
           SHA256=$(shasum -a 256 "$BOTTLE_FILE" | awk '{print $1}')
+          UPLOAD_FILE="ccost-${VERSION}.${BOTTLE_TAG}.bottle.tar.gz"
+          cp "$BOTTLE_FILE" "$UPLOAD_FILE"
 
-          echo "BOTTLE_FILE=$BOTTLE_FILE" >> "$GITHUB_ENV"
-          echo "SHA256=$SHA256" >> "$GITHUB_ENV"
+          {
+            echo "BOTTLE_FILE=$BOTTLE_FILE"
+            echo "UPLOAD_FILE=$UPLOAD_FILE"
+            echo "SHA256=$SHA256"
+          } >> "$GITHUB_ENV"
 
           cat > "bottle-metadata-${BOTTLE_TAG}.json" <<EOF
           {
             "bottle_tag": "${BOTTLE_TAG}",
             "sha256": "${SHA256}",
-            "file": "$(basename "$BOTTLE_FILE")"
+            "file": "${UPLOAD_FILE}"
           }
           EOF
 
@@ -180,7 +186,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "$GITHUB_REF_NAME" "$BOTTLE_FILE" --clobber
+          gh release upload "$GITHUB_REF_NAME" "$UPLOAD_FILE" --clobber
 
       - name: Upload bottle metadata
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
