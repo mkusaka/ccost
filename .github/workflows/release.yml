@@ -139,6 +139,7 @@ jobs:
           path = ENV.fetch("FORMULA_PATH")
           text = File.read(path)
 
+          text.sub!(/^  url ".*"$/, %(  url "https://github.com/#{ENV.fetch("GITHUB_REPOSITORY")}/archive/refs/tags/#{ENV.fetch("GITHUB_REF_NAME")}.tar.gz"))
           text.sub!(/^  version ".*"$/, %(  version "#{ENV.fetch("VERSION")}"))
           text.sub!(/^  sha256 "[0-9a-f]{64}"$/, %(  sha256 "#{ENV.fetch("SOURCE_SHA256")}"))
           text.sub!(/^    root_url ".*"$/, %(    root_url "https://github.com/#{ENV.fetch("GITHUB_REPOSITORY")}/releases/download/#{ENV.fetch("GITHUB_REF_NAME")}"))
