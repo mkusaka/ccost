@@ -1180,7 +1180,8 @@
     "supports_response_schema": true,
     "supports_system_messages": true,
     "supports_vision": true,
-    "supports_web_search": true
+    "supports_web_search": true,
+    "supports_service_tier": true
   },
   "gemini-3-pro-preview": {
     "deprecation_date": "2026-03-26",
@@ -1273,7 +1274,8 @@
     "supports_response_schema": true,
     "supports_system_messages": true,
     "supports_vision": true,
-    "supports_web_search": true
+    "supports_web_search": true,
+    "supports_service_tier": true
   },
   "gemini/gemini-3-pro-preview": {
     "deprecation_date": "2026-03-09",
