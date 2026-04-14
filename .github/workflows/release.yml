@@ -1,0 +1,225 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Run rustfmt
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --locked
+
+  release:
+    name: Create Release
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      source_sha256: ${{ steps.source_archive.outputs.sha256 }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Validate release configuration
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
+            echo "::error::Missing required secret: HOMEBREW_TAP_TOKEN"
+            exit 1
+          fi
+
+      - name: Validate tag version
+        id: version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+
+          if [[ -z "$PACKAGE_VERSION" ]]; then
+            echo "::error::Could not read package version from Cargo.toml"
+            exit 1
+          fi
+
+          if [[ "$TAG_VERSION" != "$PACKAGE_VERSION" ]]; then
+            echo "::error::Tag version ($TAG_VERSION) must match Cargo.toml version ($PACKAGE_VERSION)"
+            exit 1
+          fi
+
+          echo "VERSION=$TAG_VERSION" >> "$GITHUB_ENV"
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists"
+            exit 0
+          fi
+
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --title "ccost $GITHUB_REF_NAME" \
+            --generate-notes
+
+      - name: Compute source archive SHA256
+        id: source_archive
+        run: |
+          SOURCE_ARCHIVE="ccost-${VERSION}.tar.gz"
+          SOURCE_URL="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+
+          curl --fail --location --retry 5 --retry-delay 2 --output "$SOURCE_ARCHIVE" "$SOURCE_URL"
+
+          SHA256=$(shasum -a 256 "$SOURCE_ARCHIVE" | awk '{print $1}')
+          echo "SHA256=$SHA256" >> "$GITHUB_ENV"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+  bottle:
+    name: Build Bottle (${{ matrix.label }})
+    needs: release
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Apple Silicon
+            runner: macos-15
+            bottle_tag: arm64_sequoia
+          - label: Intel
+            runner: macos-15-intel
+            bottle_tag: sequoia
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Clone Homebrew tap
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAP_DIR="$(brew --repository)/Library/Taps/mkusaka/homebrew-tap"
+          rm -rf "$TAP_DIR"
+          gh repo clone mkusaka/homebrew-tap "$TAP_DIR"
+
+      - name: Update formula for release
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          SOURCE_SHA256: ${{ needs.release.outputs.source_sha256 }}
+        run: |
+          FORMULA_PATH="$(brew --repository)/Library/Taps/mkusaka/homebrew-tap/Formula/ccost.rb"
+          export FORMULA_PATH
+
+          ruby <<'RUBY'
+          path = ENV.fetch("FORMULA_PATH")
+          text = File.read(path)
+
+          text.sub!(/^  version ".*"$/, %(  version "#{ENV.fetch("VERSION")}"))
+          text.sub!(/^  sha256 "[0-9a-f]{64}"$/, %(  sha256 "#{ENV.fetch("SOURCE_SHA256")}"))
+          text.sub!(/^    root_url ".*"$/, %(    root_url "https://github.com/#{ENV.fetch("GITHUB_REPOSITORY")}/releases/download/#{ENV.fetch("GITHUB_REF_NAME")}"))
+
+          File.write(path, text)
+          RUBY
+
+          cat "$FORMULA_PATH"
+
+      - name: Build bottle
+        env:
+          BOTTLE_TAG: ${{ matrix.bottle_tag }}
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install --build-bottle mkusaka/tap/ccost
+          HOMEBREW_NO_AUTO_UPDATE=1 brew bottle --no-rebuild --root-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" mkusaka/tap/ccost
+
+          BOTTLE_FILE=$(find . -maxdepth 1 -name 'ccost--*.bottle*.tar.gz' -print | head -n 1)
+          if [[ -z "$BOTTLE_FILE" ]]; then
+            echo "::error::Bottle file was not generated"
+            exit 1
+          fi
+
+          SHA256=$(shasum -a 256 "$BOTTLE_FILE" | awk '{print $1}')
+
+          echo "BOTTLE_FILE=$BOTTLE_FILE" >> "$GITHUB_ENV"
+          echo "SHA256=$SHA256" >> "$GITHUB_ENV"
+
+          cat > "bottle-metadata-${BOTTLE_TAG}.json" <<EOF
+          {
+            "bottle_tag": "${BOTTLE_TAG}",
+            "sha256": "${SHA256}",
+            "file": "$(basename "$BOTTLE_FILE")"
+          }
+          EOF
+
+      - name: Upload bottle to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" "$BOTTLE_FILE" --clobber
+
+      - name: Upload bottle metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: bottle-metadata-${{ matrix.bottle_tag }}
+          path: bottle-metadata-${{ matrix.bottle_tag }}.json
+
+  update_homebrew_tap:
+    name: Update Homebrew Tap
+    needs: [release, bottle]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download bottle metadata
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bottle-metadata-*
+          merge-multiple: true
+
+      - name: Dispatch tap update
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ needs.release.outputs.version }}
+          SOURCE_SHA256: ${{ needs.release.outputs.source_sha256 }}
+        run: |
+          ARM64_SHA256=$(jq -r 'select(.bottle_tag == "arm64_sequoia") | .sha256' bottle-metadata-*.json)
+          INTEL_SHA256=$(jq -r 'select(.bottle_tag == "sequoia") | .sha256' bottle-metadata-*.json)
+
+          if [[ -z "$ARM64_SHA256" || "$ARM64_SHA256" == "null" ]]; then
+            echo "::error::Missing arm64 bottle metadata"
+            exit 1
+          fi
+
+          if [[ -z "$INTEL_SHA256" || "$INTEL_SHA256" == "null" ]]; then
+            echo "::error::Missing Intel bottle metadata"
+            exit 1
+          fi
+
+          gh api repos/mkusaka/homebrew-tap/dispatches \
+            -f event_type=update-formula \
+            -f "client_payload[formula]=ccost" \
+            -f "client_payload[version]=$VERSION" \
+            -f "client_payload[source_sha256]=$SOURCE_SHA256" \
+            -f "client_payload[arm64_sequoia_sha256]=$ARM64_SHA256" \
+            -f "client_payload[sequoia_sha256]=$INTEL_SHA256"

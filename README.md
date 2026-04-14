@@ -22,6 +22,21 @@ Everything else from ccusage is out of scope for now.
 
 ## Install
 
+Install via Homebrew:
+
+```bash
+brew tap mkusaka/tap
+brew install mkusaka/tap/ccost
+```
+
+Tagged releases publish Homebrew bottles for Apple Silicon and Intel Macs.
+Until the first tagged release is published, or on unsupported platforms,
+you can install from `HEAD`:
+
+```bash
+brew install --HEAD mkusaka/tap/ccost
+```
+
 Build from source:
 
 ```bash
@@ -129,6 +144,19 @@ requesting review from `mkusaka`.
 
 The output for `daily` and `monthly` (JSON + table) is intended to match
 ccusage for those commands.
+
+## Release
+
+Pushing a `v*` tag runs the release workflow. It validates that the tag matches
+`Cargo.toml`, creates a GitHub Release, builds Homebrew bottles for Apple
+Silicon and Intel Macs, uploads them to the release, and updates
+`mkusaka/homebrew-tap`. The workflow requires the `HOMEBREW_TAP_TOKEN`
+repository secret.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ## Development
 
