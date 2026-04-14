@@ -151,6 +151,7 @@ jobs:
       - name: Build bottle
         env:
           BOTTLE_TAG: ${{ matrix.bottle_tag }}
+          HOMEBREW_NO_INSTALL_FROM_API: "1"
         run: |
           HOMEBREW_NO_AUTO_UPDATE=1 brew install --build-bottle mkusaka/tap/ccost
           HOMEBREW_NO_AUTO_UPDATE=1 brew bottle --no-rebuild --root-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" mkusaka/tap/ccost
