@@ -115,6 +115,12 @@ jobs:
           - label: Intel
             runner: macos-15-intel
             bottle_tag: sequoia
+          - label: Tahoe Apple Silicon
+            runner: macos-26
+            bottle_tag: arm64_tahoe
+          - label: Tahoe Intel
+            runner: macos-26-intel
+            bottle_tag: tahoe
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -211,8 +217,20 @@ jobs:
           VERSION: ${{ needs.release.outputs.version }}
           SOURCE_SHA256: ${{ needs.release.outputs.source_sha256 }}
         run: |
+          ARM64_TAHOE_SHA256=$(jq -r 'select(.bottle_tag == "arm64_tahoe") | .sha256' bottle-metadata-*.json)
+          TAHOE_SHA256=$(jq -r 'select(.bottle_tag == "tahoe") | .sha256' bottle-metadata-*.json)
           ARM64_SHA256=$(jq -r 'select(.bottle_tag == "arm64_sequoia") | .sha256' bottle-metadata-*.json)
           INTEL_SHA256=$(jq -r 'select(.bottle_tag == "sequoia") | .sha256' bottle-metadata-*.json)
+
+          if [[ -z "$ARM64_TAHOE_SHA256" || "$ARM64_TAHOE_SHA256" == "null" ]]; then
+            echo "::error::Missing arm64 Tahoe bottle metadata"
+            exit 1
+          fi
+
+          if [[ -z "$TAHOE_SHA256" || "$TAHOE_SHA256" == "null" ]]; then
+            echo "::error::Missing Tahoe Intel bottle metadata"
+            exit 1
+          fi
 
           if [[ -z "$ARM64_SHA256" || "$ARM64_SHA256" == "null" ]]; then
             echo "::error::Missing arm64 bottle metadata"
@@ -229,5 +247,7 @@ jobs:
             -f "client_payload[formula]=ccost" \
             -f "client_payload[version]=$VERSION" \
             -f "client_payload[source_sha256]=$SOURCE_SHA256" \
+            -f "client_payload[arm64_tahoe_sha256]=$ARM64_TAHOE_SHA256" \
+            -f "client_payload[tahoe_sha256]=$TAHOE_SHA256" \
             -f "client_payload[arm64_sequoia_sha256]=$ARM64_SHA256" \
             -f "client_payload[sequoia_sha256]=$INTEL_SHA256"

@@ -29,9 +29,9 @@ brew tap mkusaka/tap
 brew install mkusaka/tap/ccost
 ```
 
-Tagged releases publish Homebrew bottles for Apple Silicon and Intel Macs.
-Until the first tagged release is published, or on unsupported platforms,
-you can install from `HEAD`:
+Tagged releases publish Homebrew bottles for Apple Silicon and Intel Macs on
+macOS Sequoia 15 and Tahoe 26. Until the first tagged release is published,
+or on unsupported platforms, you can install from `HEAD`:
 
 ```bash
 brew install --HEAD mkusaka/tap/ccost
@@ -149,9 +149,9 @@ ccusage for those commands.
 
 Pushing a `v*` tag runs the release workflow. It validates that the tag matches
 `Cargo.toml`, creates a GitHub Release, builds Homebrew bottles for Apple
-Silicon and Intel Macs, uploads them to the release, and updates
-`mkusaka/homebrew-tap`. The workflow requires the `HOMEBREW_TAP_TOKEN`
-repository secret.
+Silicon and Intel Macs on macOS 15 and 26, uploads them to the release, and
+updates `mkusaka/homebrew-tap`. The workflow requires the
+`HOMEBREW_TAP_TOKEN` repository secret.
 
 ```bash
 git tag v0.1.0
