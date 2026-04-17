@@ -28,7 +28,7 @@ jobs:
       - name: Update offline pricing dataset
         run: bash scripts/update_offline_pricing.sh
 
-      - name: Create pull request
+      - name: Create or update pull request
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -36,18 +36,54 @@ jobs:
             echo "No changes to commit"
             exit 0
           fi
+
           BRANCH="automation/update-offline-pricing"
+          TITLE="Update offline pricing data"
+          BODY_FILE="$(mktemp)"
+
+          cat > "$BODY_FILE" << 'EOF'
+          Summary
+
+          Refresh the checked-in offline pricing datasets from LiteLLM.
+
+          Changes
+          - Update `assets/claude_pricing.json`.
+          - Update `assets/codex_pricing.json`.
+          - Regenerate the offline pricing assets via `bash scripts/update_offline_pricing.sh`.
+
+          Why
+
+          Keeping the checked-in pricing assets current preserves offline cost lookup accuracy as upstream model pricing changes.
+
+          Notes
+
+          - This PR is generated automatically by `.github/workflows/update-offline-pricing.yml`.
+          - The workflow opens or updates a PR only when the filtered LiteLLM datasets change.
+
+          Testing
+
+          - `bash scripts/update_offline_pricing.sh`
+          EOF
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$BRANCH"
-          git add -A
-          git commit -m "Update offline pricing data"
+          git switch -C "$BRANCH"
+          git add assets/claude_pricing.json assets/codex_pricing.json
+          git commit -m "$TITLE"
           git push -f origin "$BRANCH"
-          if gh pr view "$BRANCH" --json state -q '.state' 2>/dev/null | grep -q "OPEN"; then
-            echo "PR already exists"
+
+          PR_NUMBER="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')"
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            gh pr edit "$PR_NUMBER" --title "$TITLE" --body-file "$BODY_FILE"
           else
             gh pr create \
-              --title "Update offline pricing data" \
-              --body "Automated update of embedded offline pricing data." \
+              --title "$TITLE" \
+              --body-file "$BODY_FILE" \
+              --base main \
+              --head "$BRANCH" \
               --reviewer "mkusaka"
+
+            PR_NUMBER="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')"
           fi
+
+          gh pr merge "$PR_NUMBER" --merge
