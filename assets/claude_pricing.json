@@ -863,12 +863,12 @@
     "supports_tool_choice": true,
     "supports_vision": true,
     "supports_xhigh_reasoning_effort": true,
+    "supports_max_reasoning_effort": true,
     "tool_use_system_prompt_tokens": 346,
     "provider_specific_entry": {
       "us": 1.1,
       "fast": 6.0
     },
-    "supports_max_reasoning_effort": true,
     "supports_minimal_reasoning_effort": true
   },
   "claude-opus-4-7-20260416": {
@@ -897,12 +897,12 @@
     "supports_tool_choice": true,
     "supports_vision": true,
     "supports_xhigh_reasoning_effort": true,
+    "supports_max_reasoning_effort": true,
     "tool_use_system_prompt_tokens": 346,
     "provider_specific_entry": {
       "us": 1.1,
       "fast": 6.0
     },
-    "supports_max_reasoning_effort": true,
     "supports_minimal_reasoning_effort": true
   },
   "claude-sonnet-4-20250514": {
