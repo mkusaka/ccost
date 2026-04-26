@@ -1,0 +1,136 @@
+name: Create release tag
+
+run-name: Create ${{ inputs.bump }} release tag by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump
+        required: true
+        default: patch
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+
+permissions: {}
+
+concurrency:
+  group: create-release-tag
+  cancel-in-progress: false
+
+jobs:
+  create:
+    name: Create release tag
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      ACTOR_ID: ${{ github.actor_id }}
+      ACTOR_NAME: ${{ github.actor }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+
+      - name: Create version bump commit and tag
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+
+          git fetch --force origin "$DEFAULT_BRANCH" --tags
+          git pull --ff-only origin "$DEFAULT_BRANCH"
+
+          LATEST_TAG="$(git tag -l 'v*' --sort=-v:refname | awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/ { print; exit }')"
+          if [[ -z "$LATEST_TAG" ]]; then
+            echo "::error::No release tags matching vMAJOR.MINOR.PATCH were found"
+            exit 1
+          fi
+
+          VERSION="${LATEST_TAG#v}"
+          IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+          case "$BUMP" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+            *)
+              echo "::error::Unsupported bump type: $BUMP"
+              exit 1
+              ;;
+          esac
+
+          NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          NEXT_TAG="v${NEXT_VERSION}"
+
+          if git rev-parse --verify --quiet "refs/tags/${NEXT_TAG}" >/dev/null; then
+            echo "::error::Tag ${NEXT_TAG} already exists"
+            exit 1
+          fi
+
+          NEXT_VERSION="$NEXT_VERSION" perl -0pi -e 's/^version = "[^"]+"/version = "$ENV{NEXT_VERSION}"/m' Cargo.toml
+          cargo update -p ccost --precise "$NEXT_VERSION"
+          cargo test --locked
+
+          PACKAGE_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [[ "$PACKAGE_VERSION" != "$NEXT_VERSION" ]]; then
+            echo "::error::Cargo.toml version (${PACKAGE_VERSION}) does not match ${NEXT_VERSION}"
+            exit 1
+          fi
+
+          if git diff --quiet -- Cargo.toml Cargo.lock; then
+            echo "::error::No version changes were produced"
+            exit 1
+          fi
+
+          git config user.name "$ACTOR_NAME"
+          git config user.email "${ACTOR_ID}+${ACTOR_NAME}@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: bump version to ${NEXT_VERSION}"
+          git tag "$NEXT_TAG"
+          git push origin "HEAD:${DEFAULT_BRANCH}"
+          git push origin "$NEXT_TAG"
+
+          {
+            echo "latest_tag=$LATEST_TAG"
+            echo "version=$NEXT_VERSION"
+            echo "tag=$NEXT_TAG"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: gh workflow run release.yml --ref "$RELEASE_TAG"
+
+      - name: Write summary
+        env:
+          LATEST_TAG: ${{ steps.version.outputs.latest_tag }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          {
+            echo "Created ${RELEASE_TAG} from ${LATEST_TAG}."
+            echo "Dispatched release.yml for ${RELEASE_TAG}."
+          } >> "$GITHUB_STEP_SUMMARY"
