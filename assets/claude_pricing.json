@@ -221,6 +221,7 @@
     "supports_vision": true,
     "supports_prompt_caching": false,
     "supports_reasoning": true,
+    "supports_minimal_reasoning_effort": true,
     "supports_tool_choice": true
   },
   "anthropic.claude-opus-4-1-20250805-v1:0": {
@@ -297,6 +298,7 @@
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
     "supports_reasoning": true,
+    "supports_minimal_reasoning_effort": true,
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
@@ -450,6 +452,7 @@
     "supports_prompt_caching": true,
     "supports_reasoning": true,
     "supports_response_schema": true,
+    "supports_max_reasoning_effort": true,
     "supports_tool_choice": true,
     "supports_vision": true,
     "tool_use_system_prompt_tokens": 346,
@@ -747,6 +750,7 @@
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
     "supports_reasoning": true,
+    "supports_minimal_reasoning_effort": true,
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
@@ -774,6 +778,7 @@
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
     "supports_reasoning": true,
+    "supports_minimal_reasoning_effort": true,
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
@@ -795,6 +800,7 @@
       "search_context_size_low": 0.01,
       "search_context_size_medium": 0.01
     },
+    "supports_adaptive_thinking": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
@@ -828,6 +834,7 @@
       "search_context_size_low": 0.01,
       "search_context_size_medium": 0.01
     },
+    "supports_adaptive_thinking": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
@@ -861,6 +868,7 @@
       "search_context_size_low": 0.01,
       "search_context_size_medium": 0.01
     },
+    "supports_adaptive_thinking": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
@@ -895,6 +903,7 @@
       "search_context_size_low": 0.01,
       "search_context_size_medium": 0.01
     },
+    "supports_adaptive_thinking": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
@@ -1046,6 +1055,7 @@
       "search_context_size_low": 0.01,
       "search_context_size_medium": 0.01
     },
+    "supports_adaptive_thinking": true,
     "supports_assistant_prefill": true,
     "supports_computer_use": true,
     "supports_function_calling": true,
@@ -1053,6 +1063,7 @@
     "supports_prompt_caching": true,
     "supports_reasoning": true,
     "supports_response_schema": true,
+    "supports_max_reasoning_effort": true,
     "supports_tool_choice": true,
     "supports_vision": true,
     "tool_use_system_prompt_tokens": 346,
