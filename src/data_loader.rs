@@ -7,6 +7,7 @@ use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use jwalk::WalkDir;
+use memchr::{memchr, memmem};
 use rayon::prelude::*;
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,10 @@ const DEFAULT_OPENCODE_PATH: &str = ".local/share/opencode";
 const OPENCODE_STORAGE_DIR_NAME: &str = "storage";
 const OPENCODE_MESSAGES_DIR_NAME: &str = "message";
 const OPENCODE_DB_FILENAME: &str = "opencode.db";
+const TIMESTAMP_MARKER: &[u8] = b"\"timestamp\":\"";
+const USAGE_FIELD_MARKER: &[u8] = b"\"usage\"";
+const CODEX_TURN_CONTEXT_MARKER: &[u8] = b"\"turn_context\"";
+const CODEX_TOKEN_COUNT_MARKER: &[u8] = b"\"token_count\"";
 
 fn default_claude_config_path() -> PathBuf {
     if let Some(dir) = dirs::config_dir() {
@@ -321,6 +326,56 @@ struct ParsedRecord {
     cost: f64,
 }
 
+struct ParsedFileRecords {
+    file: PathBuf,
+    earliest_timestamp: Option<DateTime<Utc>>,
+    records: Vec<ParsedRecord>,
+}
+
+fn update_earliest_timestamp(earliest: &mut Option<DateTime<Utc>>, timestamp: &str) {
+    if let Ok(parsed_timestamp) = DateTime::parse_from_rfc3339(timestamp) {
+        let parsed_timestamp = parsed_timestamp.with_timezone(&Utc);
+        *earliest = match *earliest {
+            Some(existing) if existing <= parsed_timestamp => Some(existing),
+            _ => Some(parsed_timestamp),
+        };
+    }
+}
+
+fn line_contains_any_marker(line: &[u8], markers: &[&[u8]]) -> bool {
+    markers
+        .iter()
+        .any(|marker| memmem::find(line, marker).is_some())
+}
+
+fn extract_json_string_marker<'a>(line: &'a [u8], marker: &[u8]) -> Option<&'a str> {
+    extract_json_string_marker_from(line, marker, 0)
+}
+
+fn extract_json_string_marker_from<'a>(
+    line: &'a [u8],
+    marker: &[u8],
+    from_index: usize,
+) -> Option<&'a str> {
+    if from_index >= line.len() {
+        return None;
+    }
+    let start = memmem::find(&line[from_index..], marker).map(|index| from_index + index)?;
+    let value_start = start + marker.len();
+    let value_end = memchr(b'"', &line[value_start..]).map(|index| value_start + index)?;
+    let value = &line[value_start..value_end];
+    if memchr(b'\\', value).is_some() {
+        return None;
+    }
+    std::str::from_utf8(value).ok()
+}
+
+fn update_earliest_timestamp_from_line(line: &[u8], earliest: &mut Option<DateTime<Utc>>) {
+    if let Some(timestamp) = extract_json_string_marker(line, TIMESTAMP_MARKER) {
+        update_earliest_timestamp(earliest, timestamp);
+    }
+}
+
 pub fn get_claude_paths() -> Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     let mut seen = HashSet::new();
@@ -379,9 +434,16 @@ fn parse_file_records(
     timezone: Option<chrono_tz::Tz>,
     options: &LoadOptions,
     pricing: Option<&PricingFetcher>,
-) -> Result<Vec<ParsedRecord>> {
+) -> Result<ParsedFileRecords> {
     let mut records = Vec::new();
+    let mut earliest_timestamp: Option<DateTime<Utc>> = None;
     process_jsonl_file_by_line_bytes(file, |line, _| {
+        update_earliest_timestamp_from_line(line, &mut earliest_timestamp);
+
+        if !line_contains_any_marker(line, &[USAGE_FIELD_MARKER]) {
+            return Ok(());
+        }
+
         let parsed: UsageData = match sonic_rs::from_slice(line) {
             Ok(parsed) => parsed,
             Err(_) => return Ok(()),
@@ -419,7 +481,20 @@ fn parse_file_records(
 
         Ok(())
     })?;
-    Ok(records)
+    Ok(ParsedFileRecords {
+        file: file.to_path_buf(),
+        earliest_timestamp,
+        records,
+    })
+}
+
+fn compare_parsed_file_records(a: &ParsedFileRecords, b: &ParsedFileRecords) -> std::cmp::Ordering {
+    match (&a.earliest_timestamp, &b.earliest_timestamp) {
+        (Some(a_ts), Some(b_ts)) => a_ts.cmp(b_ts).then_with(|| a.file.cmp(&b.file)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => a.file.cmp(&b.file),
+    }
 }
 
 pub fn extract_project_from_path(path: &Path) -> String {
@@ -886,6 +961,115 @@ fn codex_usage_to_tokens(delta: &CodexRawUsage) -> UsageTokens {
     }
 }
 
+fn parse_codex_file_records(
+    file: &Path,
+    timezone: Option<chrono_tz::Tz>,
+    options: &LoadOptions,
+    pricing: Option<&PricingFetcher>,
+) -> Result<ParsedFileRecords> {
+    let mut records = Vec::new();
+    let mut earliest_timestamp: Option<DateTime<Utc>> = None;
+    let mut previous_totals: Option<CodexRawUsage> = None;
+    let mut current_model: Option<String> = None;
+
+    process_jsonl_file_by_line_bytes(file, |line, _| {
+        update_earliest_timestamp_from_line(line, &mut earliest_timestamp);
+
+        if !line_contains_any_marker(line, &[CODEX_TURN_CONTEXT_MARKER, CODEX_TOKEN_COUNT_MARKER]) {
+            return Ok(());
+        }
+
+        let parsed: CodexEntry = match sonic_rs::from_slice(line) {
+            Ok(parsed) => parsed,
+            Err(_) => return Ok(()),
+        };
+
+        let payload = match parsed.payload.as_ref() {
+            Some(payload) => payload,
+            None => return Ok(()),
+        };
+
+        let entry_type = parsed.entry_type.as_deref().unwrap_or_default();
+        if entry_type == "turn_context" {
+            if let Some(model) = extract_codex_model(payload) {
+                current_model = Some(model);
+            }
+            return Ok(());
+        }
+        if entry_type != "event_msg" {
+            return Ok(());
+        }
+        if payload.payload_type.as_deref() != Some("token_count") {
+            return Ok(());
+        }
+
+        let timestamp = match parsed.timestamp.as_deref() {
+            Some(ts) => ts,
+            None => return Ok(()),
+        };
+        let date = match format_date_with_tz(timestamp, timezone) {
+            Some(date) => date,
+            None => return Ok(()),
+        };
+
+        let info = match payload.info.as_ref() {
+            Some(info) => info,
+            None => return Ok(()),
+        };
+        let last_usage = info.last_token_usage.as_ref().map(normalize_codex_usage);
+        let total_usage = info.total_token_usage.as_ref().map(normalize_codex_usage);
+
+        let raw_usage = match (last_usage, total_usage.clone()) {
+            (Some(last), _) => last,
+            (None, Some(total)) => subtract_codex_usage(&total, previous_totals.as_ref()),
+            (None, None) => return Ok(()),
+        };
+
+        if let Some(total) = total_usage {
+            previous_totals = Some(total);
+        }
+
+        if raw_usage.input_tokens == 0
+            && raw_usage.cached_input_tokens == 0
+            && raw_usage.output_tokens == 0
+            && raw_usage.reasoning_output_tokens == 0
+        {
+            return Ok(());
+        }
+
+        if let Some(model) = extract_codex_model(payload) {
+            current_model = Some(model);
+        }
+        let model = current_model
+            .clone()
+            .unwrap_or_else(|| LEGACY_FALLBACK_CODEX_MODEL.to_string());
+        let tokens = codex_usage_to_tokens(&raw_usage);
+        let cost = match options.mode {
+            CostMode::Display => 0.0,
+            CostMode::Calculate | CostMode::Auto => pricing
+                .map(|fetcher| fetcher.calculate_cost_from_tokens(&tokens, Some(&model)))
+                .unwrap_or(0.0),
+        };
+
+        records.push(ParsedRecord {
+            unique_hash: None,
+            date,
+            project: None,
+            model: Some(model),
+            tokens,
+            cost,
+        });
+
+        Ok(())
+    })?;
+
+    Ok(ParsedFileRecords {
+        file: file.to_path_buf(),
+        earliest_timestamp,
+        records,
+    })
+}
+
 fn extract_opencode_usage_tokens(message: &OpenCodeMessage) -> Option<UsageTokens> {
     let tokens = message.tokens.as_ref()?;
     let input_tokens = tokens.input.unwrap_or(0);
@@ -1162,7 +1346,6 @@ fn load_claude_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>
         return Ok(Vec::new());
     }
 
-    let sorted_files = sort_files_by_timestamp(file_list);
     let pricing = if matches!(options.mode, CostMode::Display) {
         None
     } else {
@@ -1174,7 +1357,7 @@ fn load_claude_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>
     let needs_project_grouping = options.group_by_project || options.project.is_some();
 
     let pricing_ref = pricing.as_ref();
-    let file_entries = sorted_files
+    let file_entries = file_list
         .into_iter()
         .map(|file| {
             let project = if needs_project_grouping {
@@ -1186,43 +1369,39 @@ fn load_claude_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>
         })
         .collect::<Vec<_>>();
 
-    let batch_size = (rayon::current_num_threads() * 2).max(1);
+    let mut parsed_files = file_entries
+        .par_iter()
+        .map(|(file, project)| {
+            parse_file_records(file, project.clone(), parsed_timezone, options, pricing_ref)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    parsed_files.sort_by(compare_parsed_file_records);
 
-    for chunk in file_entries.chunks(batch_size) {
-        let parsed_chunks = chunk
-            .par_iter()
-            .map(|(file, project)| {
-                parse_file_records(file, project.clone(), parsed_timezone, options, pricing_ref)
-            })
-            .collect::<Vec<_>>();
+    for parsed_file in parsed_files {
+        for record in parsed_file.records {
+            let ParsedRecord {
+                unique_hash,
+                date,
+                project,
+                model,
+                tokens,
+                cost,
+            } = record;
 
-        for records in parsed_chunks {
-            let records = records?;
-            for record in records {
-                let ParsedRecord {
-                    unique_hash,
-                    date,
-                    project,
-                    model,
-                    tokens,
-                    cost,
-                } = record;
-
-                if let Some(hash) = unique_hash
-                    && !processed_hashes.insert(hash)
-                {
-                    continue;
-                }
-                aggregate_usage_record(
-                    &mut aggregates,
-                    date,
-                    project,
-                    needs_project_grouping,
-                    model.as_deref(),
-                    &tokens,
-                    cost,
-                );
+            if let Some(hash) = unique_hash
+                && !processed_hashes.insert(hash)
+            {
+                continue;
             }
+            aggregate_usage_record(
+                &mut aggregates,
+                date,
+                project,
+                needs_project_grouping,
+                model.as_deref(),
+                &tokens,
+                cost,
+            );
         }
     }
 
@@ -1277,7 +1456,6 @@ fn load_codex_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
         return Ok(Vec::new());
     }
 
-    let sorted_files = sort_files_by_timestamp(files);
     let pricing = if matches!(options.mode, CostMode::Display) {
         None
     } else {
@@ -1285,97 +1463,26 @@ fn load_codex_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
     };
     let mut aggregates: HashMap<GroupKey, Aggregate> = HashMap::new();
     let needs_project_grouping = options.group_by_project;
+    let pricing_ref = pricing.as_ref();
 
-    for file in sorted_files {
-        let mut previous_totals: Option<CodexRawUsage> = None;
-        let mut current_model: Option<String> = None;
+    let mut parsed_files = files
+        .par_iter()
+        .map(|file| parse_codex_file_records(file, parsed_timezone, options, pricing_ref))
+        .collect::<Result<Vec<_>>>()?;
+    parsed_files.sort_by(compare_parsed_file_records);
 
-        process_jsonl_file_by_line_bytes(&file, |line, _| {
-            let parsed: CodexEntry = match sonic_rs::from_slice(line) {
-                Ok(parsed) => parsed,
-                Err(_) => return Ok(()),
-            };
-
-            let payload = match parsed.payload.as_ref() {
-                Some(payload) => payload,
-                None => return Ok(()),
-            };
-
-            let entry_type = parsed.entry_type.as_deref().unwrap_or_default();
-            if entry_type == "turn_context" {
-                if let Some(model) = extract_codex_model(payload) {
-                    current_model = Some(model);
-                }
-                return Ok(());
-            }
-            if entry_type != "event_msg" {
-                return Ok(());
-            }
-            if payload.payload_type.as_deref() != Some("token_count") {
-                return Ok(());
-            }
-
-            let timestamp = match parsed.timestamp.as_deref() {
-                Some(ts) => ts,
-                None => return Ok(()),
-            };
-            let date = match format_date_with_tz(timestamp, parsed_timezone) {
-                Some(date) => date,
-                None => return Ok(()),
-            };
-
-            let info = match payload.info.as_ref() {
-                Some(info) => info,
-                None => return Ok(()),
-            };
-            let last_usage = info.last_token_usage.as_ref().map(normalize_codex_usage);
-            let total_usage = info.total_token_usage.as_ref().map(normalize_codex_usage);
-
-            let raw_usage = match (last_usage, total_usage.clone()) {
-                (Some(last), _) => last,
-                (None, Some(total)) => subtract_codex_usage(&total, previous_totals.as_ref()),
-                (None, None) => return Ok(()),
-            };
-
-            if let Some(total) = total_usage {
-                previous_totals = Some(total);
-            }
-
-            if raw_usage.input_tokens == 0
-                && raw_usage.cached_input_tokens == 0
-                && raw_usage.output_tokens == 0
-                && raw_usage.reasoning_output_tokens == 0
-            {
-                return Ok(());
-            }
-
-            if let Some(model) = extract_codex_model(payload) {
-                current_model = Some(model);
-            }
-            let model = current_model
-                .clone()
-                .unwrap_or_else(|| LEGACY_FALLBACK_CODEX_MODEL.to_string());
-            let tokens = codex_usage_to_tokens(&raw_usage);
-            let cost = match options.mode {
-                CostMode::Display => 0.0,
-                CostMode::Calculate | CostMode::Auto => pricing
-                    .as_ref()
-                    .map(|fetcher| fetcher.calculate_cost_from_tokens(&tokens, Some(&model)))
-                    .unwrap_or(0.0),
-            };
-
+    for parsed_file in parsed_files {
+        for record in parsed_file.records {
             aggregate_usage_record(
                 &mut aggregates,
-                date,
-                None,
+                record.date,
+                record.project,
                 needs_project_grouping,
-                Some(model.as_str()),
-                &tokens,
-                cost,
+                record.model.as_deref(),
+                &record.tokens,
+                record.cost,
             );
-
-            Ok(())
-        })?;
+        }
     }
 
     let filtered = filter_by_date_range(
