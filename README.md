@@ -73,6 +73,7 @@ ccost daily --json
 ccost daily --breakdown
 ccost daily --instances
 ccost daily --project my-project
+ccost daily --agent codex
 ccost daily --since 20250101 --until 20250131
 ccost daily --timezone UTC
 ```
@@ -83,6 +84,7 @@ Monthly:
 ccost monthly
 ccost monthly --json
 ccost monthly --breakdown
+ccost monthly --agent claudecode
 ccost monthly --since 20250101 --until 20250131
 ccost monthly --timezone UTC
 ```
@@ -93,9 +95,7 @@ Common flags:
 - `--breakdown`: per-model breakdown
 - `--mode`: `auto` | `calculate` | `display`
 - `--offline`: use bundled pricing data (default; set `--offline=false` to fetch live pricing)
-- `--codex`: include Codex usage data (default `true`, set `--codex=false` to disable)
-- `--claudecode`: include Claude Code usage data (default `true`, set `--claudecode=false` to disable)
-- `--opencode`: include OpenCode usage data (default `true`, set `--opencode=false` to disable)
+- `--agent`: usage data source: `all` (default), `codex`, `claudecode`, or `opencode`; accepts comma-separated values such as `--agent codex,opencode`
 - `--order`: `asc` | `desc`
 - `--since` / `--until`: date filters in `YYYYMMDD`
 - `--timezone`: grouping timezone (e.g., `UTC`, `America/New_York`)
