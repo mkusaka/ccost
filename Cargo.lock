@@ -140,6 +140,7 @@ dependencies = [
  "comfy-table",
  "dirs",
  "jwalk",
+ "memchr",
  "num-format",
  "rayon",
  "regex",
