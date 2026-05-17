@@ -10,7 +10,7 @@ use crate::table::{
 };
 use crate::time_utils::{SortOrder, format_date_compact};
 use anyhow::{Result, anyhow};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use comfy_table::Table;
 use serde::Serialize;
 use terminal_size::terminal_size;
@@ -30,6 +30,31 @@ pub struct Cli {
 pub enum Command {
     Daily(DailyArgs),
     Monthly(MonthlyArgs),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum Agent {
+    Codex,
+    Claudecode,
+    Opencode,
+    All,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct AgentFlags {
+    codex: bool,
+    claudecode: bool,
+    opencode: bool,
+}
+
+impl AgentFlags {
+    fn all() -> Self {
+        Self {
+            codex: true,
+            claudecode: true,
+            opencode: true,
+        }
+    }
 }
 
 #[derive(Args, Clone)]
@@ -59,25 +84,26 @@ pub struct CommonArgs {
     compact: bool,
     #[arg(
         long,
-        default_value_t = true,
-        action = clap::ArgAction::Set,
-        help = "Include Codex usage data"
+        value_enum,
+        value_delimiter = ',',
+        default_value = "all",
+        help = "Usage data source: all, codex, claudecode, or opencode"
     )]
-    codex: bool,
-    #[arg(
-        long,
-        default_value_t = true,
-        action = clap::ArgAction::Set,
-        help = "Include Claude Code usage data"
-    )]
-    claudecode: bool,
-    #[arg(
-        long,
-        default_value_t = true,
-        action = clap::ArgAction::Set,
-        help = "Include OpenCode usage data"
-    )]
-    opencode: bool,
+    agent: Vec<Agent>,
+}
+
+impl CommonArgs {
+    fn agent_flags(&self) -> AgentFlags {
+        if self.agent.is_empty() || self.agent.contains(&Agent::All) {
+            return AgentFlags::all();
+        }
+
+        AgentFlags {
+            codex: self.agent.contains(&Agent::Codex),
+            claudecode: self.agent.contains(&Agent::Claudecode),
+            opencode: self.agent.contains(&Agent::Opencode),
+        }
+    }
 }
 
 #[derive(Args, Clone)]
@@ -183,13 +209,14 @@ fn parse_sort_order(value: &str) -> Result<SortOrder> {
 }
 
 fn common_options(args: &CommonArgs) -> Result<LoadOptions> {
+    let agents = args.agent_flags();
     Ok(LoadOptions {
         mode: parse_cost_mode(&args.mode)?,
         order: parse_sort_order(&args.order)?,
         offline: args.offline,
-        codex: args.codex,
-        claudecode: args.claudecode,
-        opencode: args.opencode,
+        codex: agents.codex,
+        claudecode: agents.claudecode,
+        opencode: agents.opencode,
         since: args.since.clone(),
         until: args.until.clone(),
         timezone: args.timezone.clone(),
@@ -362,14 +389,15 @@ fn table_mode(force_compact: bool) -> TableMode {
 }
 
 fn report_title(period: &str, args: &CommonArgs) -> String {
+    let agents = args.agent_flags();
     let mut sources = Vec::new();
-    if args.claudecode {
+    if agents.claudecode {
         sources.push("Claude Code");
     }
-    if args.codex {
+    if agents.codex {
         sources.push("Codex");
     }
-    if args.opencode {
+    if agents.opencode {
         sources.push("OpenCode");
     }
     let source = if sources.is_empty() {
@@ -536,5 +564,74 @@ impl UsageTable {
 impl std::fmt::Display for UsageTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.table)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_daily_common(args: &[&str]) -> CommonArgs {
+        let parsed =
+            Cli::try_parse_from(["ccost", "daily"].into_iter().chain(args.iter().copied()))
+                .unwrap();
+        match parsed.command {
+            Command::Daily(args) => args.common,
+            Command::Monthly(_) => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn agent_defaults_to_all_sources() {
+        let common = parse_daily_common(&[]);
+
+        assert_eq!(common.agent_flags(), AgentFlags::all());
+        assert_eq!(
+            report_title("Daily", &common),
+            "Claude Code + Codex + OpenCode Token Usage Report - Daily"
+        );
+    }
+
+    #[test]
+    fn agent_accepts_single_source() {
+        let common = parse_daily_common(&["--agent=codex"]);
+
+        assert_eq!(
+            common.agent_flags(),
+            AgentFlags {
+                codex: true,
+                claudecode: false,
+                opencode: false,
+            }
+        );
+        assert_eq!(
+            report_title("Daily", &common),
+            "Codex Token Usage Report - Daily"
+        );
+    }
+
+    #[test]
+    fn agent_accepts_comma_separated_sources() {
+        let common = parse_daily_common(&["--agent=codex,opencode"]);
+
+        assert_eq!(
+            common.agent_flags(),
+            AgentFlags {
+                codex: true,
+                claudecode: false,
+                opencode: true,
+            }
+        );
+        assert_eq!(
+            report_title("Daily", &common),
+            "Codex + OpenCode Token Usage Report - Daily"
+        );
+    }
+
+    #[test]
+    fn removed_source_boolean_flags_are_rejected() {
+        let result = Cli::try_parse_from(["ccost", "daily", "--codex=false"]);
+
+        assert!(result.is_err());
     }
 }
