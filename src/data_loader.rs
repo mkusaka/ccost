@@ -1031,9 +1031,6 @@ fn create_codex_unique_hash(timestamp: &str, model: &str, usage: &CodexRawUsage)
 fn parse_codex_file_records(
     file: &Path,
     timezone: Option<chrono_tz::Tz>,
-    options: &LoadOptions,
-    pricing: Option<&PricingFetcher>,
-    codex_fast_speed: bool,
 ) -> Result<ParsedFileRecords> {
     let mut records = Vec::new();
     let mut earliest_timestamp: Option<DateTime<Utc>> = None;
@@ -1112,18 +1109,8 @@ fn parse_codex_file_records(
             .clone()
             .unwrap_or_else(|| LEGACY_FALLBACK_CODEX_MODEL.to_string());
         let tokens = codex_usage_to_tokens(&raw_usage);
-        let cost = match options.mode {
-            CostMode::Display => 0.0,
-            CostMode::Calculate | CostMode::Auto => pricing
-                .map(|fetcher| {
-                    fetcher.calculate_codex_cost_from_tokens(
-                        &tokens,
-                        Some(&model),
-                        codex_fast_speed,
-                    )
-                })
-                .unwrap_or(0.0),
-        };
+        // Codex cost is recalculated after aggregation so model-level pricing is applied once.
+        let cost = 0.0;
 
         records.push(ParsedRecord {
             unique_hash: Some(create_codex_unique_hash(timestamp, &model, &raw_usage)),
@@ -1588,15 +1575,7 @@ fn load_codex_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
 
     let mut parsed_files = files
         .par_iter()
-        .map(|file| {
-            parse_codex_file_records(
-                file,
-                parsed_timezone,
-                options,
-                pricing_ref,
-                codex_fast_speed,
-            )
-        })
+        .map(|file| parse_codex_file_records(file, parsed_timezone))
         .collect::<Result<Vec<_>>>()?;
     parsed_files.sort_by(compare_parsed_file_records);
 

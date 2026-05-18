@@ -1,6 +1,10 @@
 use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone};
 use chrono_tz::Tz;
 use std::str::FromStr;
+use std::sync::LazyLock;
+
+static SIMPLE_DATE_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^\d{4}-\d{2}-\d{2}$").expect("valid date regex"));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortOrder {
@@ -51,9 +55,7 @@ pub fn format_month(date_str: &str) -> Option<String> {
 }
 
 pub fn format_date_compact(date_str: &str, timezone: Option<&str>) -> Option<String> {
-    let is_simple_date = regex::Regex::new(r"^\d{4}-\d{2}-\d{2}$")
-        .map(|re| re.is_match(date_str))
-        .unwrap_or(false);
+    let is_simple_date = SIMPLE_DATE_RE.is_match(date_str);
 
     let date = if is_simple_date {
         let naive = NaiveDate::parse_from_str(date_str, "%Y-%m-%d").ok()?;

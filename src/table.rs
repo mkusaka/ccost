@@ -1,5 +1,16 @@
 use num_format::{Locale, ToFormattedString};
 use regex::Regex;
+use std::sync::LazyLock;
+
+static PI_MODEL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\[pi\] (.+)$").expect("valid pi model regex"));
+static ANTHROPIC_CLAUDE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^anthropic/claude-(\w+)-([\d.]+)$").expect("valid model regex"));
+static CLAUDE_DATED_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^claude-(\w+)-([\d-]+)-(\d{8})$").expect("valid dated model regex")
+});
+static CLAUDE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^claude-(\w+)-([\d-]+)$").expect("valid model regex"));
 
 #[derive(Debug, Clone)]
 pub struct UsageDataRow {
@@ -52,31 +63,19 @@ pub fn format_currency(amount: f64) -> String {
 }
 
 fn format_model_name(model_name: &str) -> String {
-    if let Some(caps) = Regex::new(r"^\[pi\] (.+)$")
-        .ok()
-        .and_then(|re| re.captures(model_name))
-    {
+    if let Some(caps) = PI_MODEL_RE.captures(model_name) {
         return format!("[pi] {}", format_model_name(&caps[1]));
     }
 
-    if let Some(caps) = Regex::new(r"^anthropic/claude-(\w+)-([\d.]+)$")
-        .ok()
-        .and_then(|re| re.captures(model_name))
-    {
+    if let Some(caps) = ANTHROPIC_CLAUDE_RE.captures(model_name) {
         return format!("{}-{}", &caps[1], &caps[2]);
     }
 
-    if let Some(caps) = Regex::new(r"^claude-(\w+)-([\d-]+)-(\d{8})$")
-        .ok()
-        .and_then(|re| re.captures(model_name))
-    {
+    if let Some(caps) = CLAUDE_DATED_RE.captures(model_name) {
         return format!("{}-{}", &caps[1], &caps[2]);
     }
 
-    if let Some(caps) = Regex::new(r"^claude-(\w+)-([\d-]+)$")
-        .ok()
-        .and_then(|re| re.captures(model_name))
-    {
+    if let Some(caps) = CLAUDE_RE.captures(model_name) {
         return format!("{}-{}", &caps[1], &caps[2]);
     }
 
