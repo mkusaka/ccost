@@ -2,7 +2,6 @@ use crate::pricing::{CostMode, PricingFetcher, UsageTokens};
 use crate::time_utils::{
     SortOrder, filter_by_date_range, format_date_with_tz, format_month, sort_by_date,
 };
-use crate::token_utils::{AggregatedTokenCounts, get_total_tokens_from_aggregated};
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
@@ -23,6 +22,7 @@ const CLAUDE_PROJECTS_DIR_NAME: &str = "projects";
 const DEFAULT_CLAUDE_CODE_PATH: &str = ".claude";
 const CODEX_HOME_ENV: &str = "CODEX_HOME";
 const CODEX_SESSIONS_DIR_NAME: &str = "sessions";
+const CODEX_CONFIG_FILENAME: &str = "config.toml";
 const DEFAULT_CODEX_PATH: &str = ".codex";
 const LEGACY_FALLBACK_CODEX_MODEL: &str = "gpt-5";
 const OPENCODE_DATA_DIR_ENV: &str = "OPENCODE_DATA_DIR";
@@ -184,6 +184,7 @@ pub struct ModelBreakdown {
     pub output_tokens: u64,
     pub cache_creation_tokens: u64,
     pub cache_read_tokens: u64,
+    pub total_tokens: u64,
     pub cost: f64,
 }
 
@@ -194,6 +195,7 @@ pub struct DailyUsage {
     pub output_tokens: u64,
     pub cache_creation_tokens: u64,
     pub cache_read_tokens: u64,
+    pub total_tokens: u64,
     pub total_cost: f64,
     pub models_used: Vec<String>,
     pub model_breakdowns: Vec<ModelBreakdown>,
@@ -207,6 +209,7 @@ pub struct MonthlyUsage {
     pub output_tokens: u64,
     pub cache_creation_tokens: u64,
     pub cache_read_tokens: u64,
+    pub total_tokens: u64,
     pub total_cost: f64,
     pub models_used: Vec<String>,
     pub model_breakdowns: Vec<ModelBreakdown>,
@@ -219,6 +222,7 @@ struct TokenStats {
     output_tokens: u64,
     cache_creation_tokens: u64,
     cache_read_tokens: u64,
+    total_tokens: u64,
     cost: f64,
 }
 
@@ -229,6 +233,7 @@ impl Default for TokenStats {
             output_tokens: 0,
             cache_creation_tokens: 0,
             cache_read_tokens: 0,
+            total_tokens: 0,
             cost: 0.0,
         }
     }
@@ -240,6 +245,7 @@ struct Aggregate {
     output_tokens: u64,
     cache_creation_tokens: u64,
     cache_read_tokens: u64,
+    total_tokens: u64,
     total_cost: f64,
     models_used: Vec<String>,
     models_used_seen: HashSet<String>,
@@ -253,6 +259,7 @@ impl Default for Aggregate {
             output_tokens: 0,
             cache_creation_tokens: 0,
             cache_read_tokens: 0,
+            total_tokens: 0,
             total_cost: 0.0,
             models_used: Vec::new(),
             models_used_seen: HashSet::new(),
@@ -323,6 +330,7 @@ struct ParsedRecord {
     project: Option<Arc<str>>,
     model: Option<String>,
     tokens: UsageTokens,
+    total_tokens: u64,
     cost: f64,
 }
 
@@ -468,6 +476,7 @@ fn parse_file_records(
             Some(tokens) => tokens,
             None => return Ok(()),
         };
+        let total_tokens = total_tokens_from_usage(&tokens);
         let model = message.model;
 
         records.push(ParsedRecord {
@@ -476,6 +485,7 @@ fn parse_file_records(
             project: project.clone(),
             model,
             tokens,
+            total_tokens,
             cost,
         });
 
@@ -672,18 +682,37 @@ fn extract_usage_tokens(message: &UsageMessage) -> Option<UsageTokens> {
     let usage = message.usage.as_ref()?;
     let input = usage.input_tokens?;
     let output = usage.output_tokens?;
-    Some(UsageTokens {
+    let tokens = UsageTokens {
         input_tokens: input,
         output_tokens: output,
         cache_creation_input_tokens: usage.cache_creation_input_tokens.unwrap_or(0),
         cache_read_input_tokens: usage.cache_read_input_tokens.unwrap_or(0),
-    })
+    };
+
+    if tokens.input_tokens == 0
+        && tokens.output_tokens == 0
+        && tokens.cache_creation_input_tokens == 0
+        && tokens.cache_read_input_tokens == 0
+    {
+        return None;
+    }
+
+    Some(tokens)
+}
+
+fn total_tokens_from_usage(tokens: &UsageTokens) -> u64 {
+    tokens
+        .input_tokens
+        .saturating_add(tokens.output_tokens)
+        .saturating_add(tokens.cache_creation_input_tokens)
+        .saturating_add(tokens.cache_read_input_tokens)
 }
 
 fn update_model_breakdowns(
     breakdowns: &mut HashMap<String, TokenStats>,
     model_name: &str,
     tokens: &UsageTokens,
+    total_tokens: u64,
     cost: f64,
 ) {
     if let Some(entry) = breakdowns.get_mut(model_name) {
@@ -691,6 +720,7 @@ fn update_model_breakdowns(
         entry.output_tokens += tokens.output_tokens;
         entry.cache_creation_tokens += tokens.cache_creation_input_tokens;
         entry.cache_read_tokens += tokens.cache_read_input_tokens;
+        entry.total_tokens += total_tokens;
         entry.cost += cost;
         return;
     }
@@ -700,6 +730,7 @@ fn update_model_breakdowns(
     entry.output_tokens += tokens.output_tokens;
     entry.cache_creation_tokens += tokens.cache_creation_input_tokens;
     entry.cache_read_tokens += tokens.cache_read_input_tokens;
+    entry.total_tokens += total_tokens;
     entry.cost += cost;
 }
 
@@ -918,7 +949,7 @@ fn normalize_codex_usage(usage: &CodexTokenUsage) -> CodexRawUsage {
     let reasoning = usage.reasoning_output_tokens.unwrap_or(0);
     let total = usage
         .total_tokens
-        .unwrap_or_else(|| input.saturating_add(output));
+        .unwrap_or_else(|| input.saturating_add(output).saturating_add(reasoning));
     CodexRawUsage {
         input_tokens: input,
         cached_input_tokens: cached,
@@ -927,7 +958,7 @@ fn normalize_codex_usage(usage: &CodexTokenUsage) -> CodexRawUsage {
         total_tokens: if total > 0 {
             total
         } else {
-            input.saturating_add(output)
+            input.saturating_add(output).saturating_add(reasoning)
         },
     }
 }
@@ -952,13 +983,49 @@ fn subtract_codex_usage(
 
 fn codex_usage_to_tokens(delta: &CodexRawUsage) -> UsageTokens {
     let cached = delta.cached_input_tokens.min(delta.input_tokens);
-    let input = delta.input_tokens.saturating_sub(cached);
     UsageTokens {
-        input_tokens: input,
+        input_tokens: delta.input_tokens,
         output_tokens: delta.output_tokens,
         cache_creation_input_tokens: 0,
         cache_read_input_tokens: cached,
     }
+}
+
+fn is_codex_fast_service_tier(config: &str) -> bool {
+    config.lines().any(|line| {
+        let uncommented = line.split('#').next().unwrap_or_default();
+        let Some((key, value)) = uncommented.split_once('=') else {
+            return false;
+        };
+        if key.trim() != "service_tier" {
+            return false;
+        }
+        let normalized = value
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_ascii_lowercase();
+        matches!(normalized.as_str(), "fast" | "priority")
+    })
+}
+
+fn resolve_codex_fast_speed(sessions_dir: &Path) -> bool {
+    let config_dir = sessions_dir.parent().unwrap_or(sessions_dir);
+    let config_path = config_dir.join(CODEX_CONFIG_FILENAME);
+    std::fs::read_to_string(config_path)
+        .map(|config| is_codex_fast_service_tier(&config))
+        .unwrap_or(false)
+}
+
+fn create_codex_unique_hash(timestamp: &str, model: &str, usage: &CodexRawUsage) -> String {
+    format!(
+        "{timestamp}\0{model}\0{}\0{}\0{}\0{}\0{}",
+        usage.input_tokens,
+        usage.cached_input_tokens.min(usage.input_tokens),
+        usage.output_tokens,
+        usage.reasoning_output_tokens,
+        usage.total_tokens
+    )
 }
 
 fn parse_codex_file_records(
@@ -966,6 +1033,7 @@ fn parse_codex_file_records(
     timezone: Option<chrono_tz::Tz>,
     options: &LoadOptions,
     pricing: Option<&PricingFetcher>,
+    codex_fast_speed: bool,
 ) -> Result<ParsedFileRecords> {
     let mut records = Vec::new();
     let mut earliest_timestamp: Option<DateTime<Utc>> = None;
@@ -1047,16 +1115,23 @@ fn parse_codex_file_records(
         let cost = match options.mode {
             CostMode::Display => 0.0,
             CostMode::Calculate | CostMode::Auto => pricing
-                .map(|fetcher| fetcher.calculate_cost_from_tokens(&tokens, Some(&model)))
+                .map(|fetcher| {
+                    fetcher.calculate_codex_cost_from_tokens(
+                        &tokens,
+                        Some(&model),
+                        codex_fast_speed,
+                    )
+                })
                 .unwrap_or(0.0),
         };
 
         records.push(ParsedRecord {
-            unique_hash: None,
+            unique_hash: Some(create_codex_unique_hash(timestamp, &model, &raw_usage)),
             date,
             project: None,
             model: Some(model),
             tokens,
+            total_tokens: raw_usage.total_tokens,
             cost,
         });
 
@@ -1125,6 +1200,7 @@ fn parse_opencode_message(
     let created_dt = DateTime::<Utc>::from_timestamp_millis(created)?;
     let date = format_date_with_tz(&created_dt.to_rfc3339(), timezone)?;
     let tokens = extract_opencode_usage_tokens(&message)?;
+    let total_tokens = total_tokens_from_usage(&tokens);
     let cost = calculate_cost_for_opencode_entry(&message, &tokens, options.mode, pricing);
 
     Some(ParsedRecord {
@@ -1133,6 +1209,7 @@ fn parse_opencode_message(
         project: None,
         model: Some(model),
         tokens,
+        total_tokens,
         cost,
     })
 }
@@ -1245,17 +1322,17 @@ fn load_opencode_json_records(
 
 fn aggregate_usage_record(
     aggregates: &mut HashMap<GroupKey, Aggregate>,
-    date: String,
-    project: Option<Arc<str>>,
+    group: GroupKey,
     needs_project_grouping: bool,
     model: Option<&str>,
     tokens: &UsageTokens,
+    total_tokens: u64,
     cost: f64,
 ) {
     let key = if needs_project_grouping {
-        (date, project)
+        group
     } else {
-        (date, None)
+        (group.0, None)
     };
 
     let entry = aggregates.entry(key).or_default();
@@ -1263,15 +1340,54 @@ fn aggregate_usage_record(
     entry.output_tokens += tokens.output_tokens;
     entry.cache_creation_tokens += tokens.cache_creation_input_tokens;
     entry.cache_read_tokens += tokens.cache_read_input_tokens;
+    entry.total_tokens += total_tokens;
     entry.total_cost += cost;
 
     if let Some(model) = model {
         if model != "<synthetic>" {
             entry.push_model(model);
-            update_model_breakdowns(&mut entry.model_breakdowns, model, tokens, cost);
+            update_model_breakdowns(
+                &mut entry.model_breakdowns,
+                model,
+                tokens,
+                total_tokens,
+                cost,
+            );
         }
     } else {
-        update_model_breakdowns(&mut entry.model_breakdowns, "unknown", tokens, cost);
+        update_model_breakdowns(
+            &mut entry.model_breakdowns,
+            "unknown",
+            tokens,
+            total_tokens,
+            cost,
+        );
+    }
+}
+
+fn recalculate_codex_aggregate_costs(
+    aggregates: &mut HashMap<GroupKey, Aggregate>,
+    pricing: Option<&PricingFetcher>,
+    codex_fast_speed: bool,
+) {
+    let Some(fetcher) = pricing else {
+        return;
+    };
+
+    for aggregate in aggregates.values_mut() {
+        aggregate.total_cost = 0.0;
+        for (model, stats) in &mut aggregate.model_breakdowns {
+            let tokens = UsageTokens {
+                input_tokens: stats.input_tokens,
+                output_tokens: stats.output_tokens,
+                cache_creation_input_tokens: stats.cache_creation_tokens,
+                cache_read_input_tokens: stats.cache_read_tokens,
+            };
+            let cost =
+                fetcher.calculate_codex_cost_from_tokens(&tokens, Some(model), codex_fast_speed);
+            stats.cost = cost;
+            aggregate.total_cost += cost;
+        }
     }
 }
 
@@ -1289,6 +1405,7 @@ fn aggregates_to_daily_usage(aggregates: HashMap<GroupKey, Aggregate>) -> Vec<Da
                 output_tokens: stats.output_tokens,
                 cache_creation_tokens: stats.cache_creation_tokens,
                 cache_read_tokens: stats.cache_read_tokens,
+                total_tokens: stats.total_tokens,
                 cost: stats.cost,
             })
             .collect::<Vec<_>>();
@@ -1304,6 +1421,7 @@ fn aggregates_to_daily_usage(aggregates: HashMap<GroupKey, Aggregate>) -> Vec<Da
             output_tokens: aggregate.output_tokens,
             cache_creation_tokens: aggregate.cache_creation_tokens,
             cache_read_tokens: aggregate.cache_read_tokens,
+            total_tokens: aggregate.total_tokens,
             total_cost: aggregate.total_cost,
             models_used: aggregate.models_used,
             model_breakdowns,
@@ -1385,6 +1503,7 @@ fn load_claude_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>
                 project,
                 model,
                 tokens,
+                total_tokens,
                 cost,
             } = record;
 
@@ -1395,11 +1514,11 @@ fn load_claude_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>
             }
             aggregate_usage_record(
                 &mut aggregates,
-                date,
-                project,
+                (date, project),
                 needs_project_grouping,
                 model.as_deref(),
                 &tokens,
+                total_tokens,
                 cost,
             );
         }
@@ -1464,26 +1583,43 @@ fn load_codex_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
     let mut aggregates: HashMap<GroupKey, Aggregate> = HashMap::new();
     let needs_project_grouping = options.group_by_project;
     let pricing_ref = pricing.as_ref();
+    let codex_fast_speed = resolve_codex_fast_speed(&sessions_dir);
+    let mut processed_hashes = HashSet::new();
 
     let mut parsed_files = files
         .par_iter()
-        .map(|file| parse_codex_file_records(file, parsed_timezone, options, pricing_ref))
+        .map(|file| {
+            parse_codex_file_records(
+                file,
+                parsed_timezone,
+                options,
+                pricing_ref,
+                codex_fast_speed,
+            )
+        })
         .collect::<Result<Vec<_>>>()?;
     parsed_files.sort_by(compare_parsed_file_records);
 
     for parsed_file in parsed_files {
         for record in parsed_file.records {
+            if let Some(hash) = record.unique_hash.as_ref()
+                && !processed_hashes.insert(hash.clone())
+            {
+                continue;
+            }
             aggregate_usage_record(
                 &mut aggregates,
-                record.date,
-                record.project,
+                (record.date, record.project),
                 needs_project_grouping,
                 record.model.as_deref(),
                 &record.tokens,
+                record.total_tokens,
                 record.cost,
             );
         }
     }
+
+    recalculate_codex_aggregate_costs(&mut aggregates, pricing_ref, codex_fast_speed);
 
     let filtered = filter_by_date_range(
         aggregates_to_daily_usage(aggregates),
@@ -1565,6 +1701,7 @@ fn load_opencode_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsag
             project,
             model,
             tokens,
+            total_tokens,
             cost,
         } = record;
 
@@ -1576,11 +1713,11 @@ fn load_opencode_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsag
 
         aggregate_usage_record(
             &mut aggregates,
-            date,
-            project,
+            (date, project),
             needs_project_grouping,
             model.as_deref(),
             &tokens,
+            total_tokens,
             cost,
         );
     }
@@ -1609,6 +1746,7 @@ fn merge_daily_usage(entries: Vec<DailyUsage>, order: SortOrder) -> Vec<DailyUsa
         aggregate.output_tokens += entry.output_tokens;
         aggregate.cache_creation_tokens += entry.cache_creation_tokens;
         aggregate.cache_read_tokens += entry.cache_read_tokens;
+        aggregate.total_tokens += entry.total_tokens;
         aggregate.total_cost += entry.total_cost;
         for model in entry.models_used {
             aggregate.push_model(&model);
@@ -1623,6 +1761,7 @@ fn merge_daily_usage(entries: Vec<DailyUsage>, order: SortOrder) -> Vec<DailyUsa
                     cache_creation_input_tokens: breakdown.cache_creation_tokens,
                     cache_read_input_tokens: breakdown.cache_read_tokens,
                 },
+                breakdown.total_tokens,
                 breakdown.cost,
             );
         }
@@ -1640,6 +1779,7 @@ fn merge_daily_usage(entries: Vec<DailyUsage>, order: SortOrder) -> Vec<DailyUsa
                 output_tokens: stats.output_tokens,
                 cache_creation_tokens: stats.cache_creation_tokens,
                 cache_read_tokens: stats.cache_read_tokens,
+                total_tokens: stats.total_tokens,
                 cost: stats.cost,
             })
             .collect::<Vec<_>>();
@@ -1654,6 +1794,7 @@ fn merge_daily_usage(entries: Vec<DailyUsage>, order: SortOrder) -> Vec<DailyUsa
             output_tokens: aggregate.output_tokens,
             cache_creation_tokens: aggregate.cache_creation_tokens,
             cache_read_tokens: aggregate.cache_read_tokens,
+            total_tokens: aggregate.total_tokens,
             total_cost: aggregate.total_cost,
             models_used: aggregate.models_used,
             model_breakdowns,
@@ -1716,6 +1857,7 @@ pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>
         aggregate.output_tokens += entry.output_tokens;
         aggregate.cache_creation_tokens += entry.cache_creation_tokens;
         aggregate.cache_read_tokens += entry.cache_read_tokens;
+        aggregate.total_tokens += entry.total_tokens;
         aggregate.total_cost += entry.total_cost;
         for model in entry.models_used {
             aggregate.push_model(&model);
@@ -1730,6 +1872,7 @@ pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>
                     cache_creation_input_tokens: breakdown.cache_creation_tokens,
                     cache_read_input_tokens: breakdown.cache_read_tokens,
                 },
+                breakdown.total_tokens,
                 breakdown.cost,
             );
         }
@@ -1747,6 +1890,7 @@ pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>
                 output_tokens: stats.output_tokens,
                 cache_creation_tokens: stats.cache_creation_tokens,
                 cache_read_tokens: stats.cache_read_tokens,
+                total_tokens: stats.total_tokens,
                 cost: stats.cost,
             })
             .collect::<Vec<_>>();
@@ -1764,6 +1908,7 @@ pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>
             output_tokens: aggregate.output_tokens,
             cache_creation_tokens: aggregate.cache_creation_tokens,
             cache_read_tokens: aggregate.cache_read_tokens,
+            total_tokens: aggregate.total_tokens,
             total_cost: aggregate.total_cost,
             models_used,
             model_breakdowns,
@@ -1783,6 +1928,7 @@ pub fn calculate_totals_daily(data: &[DailyUsage]) -> UsageTotals {
         totals.output_tokens += item.output_tokens;
         totals.cache_creation_tokens += item.cache_creation_tokens;
         totals.cache_read_tokens += item.cache_read_tokens;
+        totals.total_tokens += item.total_tokens;
         totals.total_cost += item.total_cost;
     }
     totals
@@ -1795,6 +1941,7 @@ pub fn calculate_totals_monthly(data: &[MonthlyUsage]) -> UsageTotals {
         totals.output_tokens += item.output_tokens;
         totals.cache_creation_tokens += item.cache_creation_tokens;
         totals.cache_read_tokens += item.cache_read_tokens;
+        totals.total_tokens += item.total_tokens;
         totals.total_cost += item.total_cost;
     }
     totals
@@ -1806,17 +1953,13 @@ pub struct UsageTotals {
     pub output_tokens: u64,
     pub cache_creation_tokens: u64,
     pub cache_read_tokens: u64,
+    pub total_tokens: u64,
     pub total_cost: f64,
 }
 
 impl UsageTotals {
     pub fn total_tokens(&self) -> u64 {
-        get_total_tokens_from_aggregated(AggregatedTokenCounts {
-            input_tokens: self.input_tokens,
-            output_tokens: self.output_tokens,
-            cache_creation_tokens: self.cache_creation_tokens,
-            cache_read_tokens: self.cache_read_tokens,
-        })
+        self.total_tokens
     }
 }
 
@@ -2128,6 +2271,7 @@ mod tests {
             r#"{"timestamp":"2024-01-01T18:00:00Z","message":{}}"#,
             r#"{"timestamp":"2024-01-01T20:00:00Z"}"#,
             r#"{"message":{"usage":{"input_tokens":200,"output_tokens":100}}}"#,
+            r#"{"timestamp":"2024-01-01T21:00:00Z","message":{"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}},"costUSD":9.99}"#,
             r#"{"timestamp":"2024-01-01T22:00:00Z","message":{"usage":{"input_tokens":300,"output_tokens":150}},"costUSD":0.03}"#,
         ]
         .join("\n");
@@ -2902,11 +3046,193 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].date, "2025-01-10");
-        assert_eq!(result[0].input_tokens, 1500);
+        assert_eq!(result[0].input_tokens, 2000);
         assert_eq!(result[0].cache_read_tokens, 500);
         assert_eq!(result[0].output_tokens, 600);
+        assert_eq!(result[0].total_tokens, 2600);
         assert!(result[0].total_cost > 0.0);
         assert!(result[0].models_used.iter().any(|m| m == "gpt-5-codex"));
+    }
+
+    #[test]
+    fn load_daily_usage_deduplicates_codex_token_events() {
+        let fixture = create_fixture();
+        let event = json!({
+            "timestamp": "2025-01-10T10:00:01Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": {
+                        "input_tokens": 1000,
+                        "cached_input_tokens": 100,
+                        "output_tokens": 200,
+                        "reasoning_output_tokens": 0,
+                        "total_tokens": 1200
+                    },
+                    "model": "gpt-5-codex"
+                }
+            }
+        })
+        .to_string();
+        write_file(fixture.path(), "sessions/session-1.jsonl", &event);
+        write_file(fixture.path(), "sessions/copy/session-1.jsonl", &event);
+
+        let result = load_daily_usage_data(LoadOptions {
+            codex: true,
+            claudecode: false,
+            codex_path: Some(fixture.path().join("sessions")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Calculate,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].input_tokens, 1000);
+        assert_eq!(result[0].cache_read_tokens, 100);
+        assert_eq!(result[0].output_tokens, 200);
+        assert_eq!(result[0].total_tokens, 1200);
+    }
+
+    #[test]
+    fn load_daily_usage_calculates_codex_cost_from_daily_model_totals() {
+        let fixture = create_fixture();
+        let session = [
+            json!({
+                "timestamp": "2025-01-10T10:00:00Z",
+                "type": "turn_context",
+                "payload": { "model": "gpt-5-codex" }
+            })
+            .to_string(),
+            json!({
+                "timestamp": "2025-01-10T10:00:01Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": 1,
+                            "cached_input_tokens": 0,
+                            "output_tokens": 0,
+                            "reasoning_output_tokens": 0,
+                            "total_tokens": 1
+                        }
+                    }
+                }
+            })
+            .to_string(),
+            json!({
+                "timestamp": "2025-01-10T10:00:02Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": 3906,
+                            "cached_input_tokens": 0,
+                            "output_tokens": 0,
+                            "reasoning_output_tokens": 0,
+                            "total_tokens": 3906
+                        }
+                    }
+                }
+            })
+            .to_string(),
+        ]
+        .join("\n");
+        write_file(fixture.path(), "sessions/session-1.jsonl", &session);
+
+        let result = load_daily_usage_data(LoadOptions {
+            codex: true,
+            claudecode: false,
+            codex_path: Some(fixture.path().join("sessions")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Calculate,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        let expected = PricingFetcher::new().calculate_codex_cost_from_tokens(
+            &UsageTokens {
+                input_tokens: 3907,
+                output_tokens: 0,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 0,
+            },
+            Some("gpt-5-codex"),
+            false,
+        );
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].input_tokens, 3907);
+        assert_eq!(result[0].total_cost, expected);
+        assert_eq!(result[0].model_breakdowns[0].cost, expected);
+    }
+
+    #[test]
+    fn load_daily_usage_applies_codex_fast_service_tier() {
+        let standard_fixture = create_fixture();
+        let fast_fixture = create_fixture();
+        let session = [
+            json!({
+                "timestamp": "2025-01-10T10:00:00Z",
+                "type": "turn_context",
+                "payload": { "model": "gpt-5-codex" }
+            })
+            .to_string(),
+            json!({
+                "timestamp": "2025-01-10T10:00:01Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": 1000,
+                            "cached_input_tokens": 100,
+                            "output_tokens": 200,
+                            "reasoning_output_tokens": 0,
+                            "total_tokens": 1200
+                        }
+                    }
+                }
+            })
+            .to_string(),
+        ]
+        .join("\n");
+        write_file(
+            standard_fixture.path(),
+            "sessions/session-1.jsonl",
+            &session,
+        );
+        write_file(
+            fast_fixture.path(),
+            "config.toml",
+            "service_tier = \"fast\"\n",
+        );
+        write_file(fast_fixture.path(), "sessions/session-1.jsonl", &session);
+
+        let standard = load_daily_usage_data(LoadOptions {
+            codex: true,
+            claudecode: false,
+            codex_path: Some(standard_fixture.path().join("sessions")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Calculate,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+        let fast = load_daily_usage_data(LoadOptions {
+            codex: true,
+            claudecode: false,
+            codex_path: Some(fast_fixture.path().join("sessions")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Calculate,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert!(standard[0].total_cost > 0.0);
+        assert!((fast[0].total_cost - standard[0].total_cost * 2.0).abs() < 1e-12);
     }
 
     #[test]
@@ -2970,9 +3296,10 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].date, "2025-01-10");
-        assert_eq!(result[0].input_tokens, 1000);
+        assert_eq!(result[0].input_tokens, 1100);
         assert_eq!(result[0].output_tokens, 250);
         assert_eq!(result[0].cache_read_tokens, 100);
+        assert_eq!(result[0].total_tokens, 1350);
         assert!(result[0].total_cost > 0.01);
         assert!(
             result[0]

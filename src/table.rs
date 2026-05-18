@@ -1,4 +1,3 @@
-use crate::token_utils::{AggregatedTokenCounts, get_total_tokens_from_aggregated};
 use num_format::{Locale, ToFormattedString};
 use regex::Regex;
 
@@ -8,6 +7,7 @@ pub struct UsageDataRow {
     pub output_tokens: u64,
     pub cache_creation_tokens: u64,
     pub cache_read_tokens: u64,
+    pub total_tokens: u64,
     pub total_cost: f64,
     pub models_used: Vec<String>,
 }
@@ -19,6 +19,7 @@ pub struct ModelBreakdownRow {
     pub output_tokens: u64,
     pub cache_creation_tokens: u64,
     pub cache_read_tokens: u64,
+    pub total_tokens: u64,
     pub cost: f64,
 }
 
@@ -111,14 +112,6 @@ pub fn build_usage_row(
     data: &UsageDataRow,
     mode: TableMode,
 ) -> Vec<String> {
-    let totals = AggregatedTokenCounts {
-        input_tokens: data.input_tokens,
-        output_tokens: data.output_tokens,
-        cache_creation_tokens: data.cache_creation_tokens,
-        cache_read_tokens: data.cache_read_tokens,
-    };
-    let total_tokens = get_total_tokens_from_aggregated(totals);
-
     match mode {
         TableMode::Full => vec![
             first_column_value.to_string(),
@@ -127,7 +120,7 @@ pub fn build_usage_row(
             format_number(data.output_tokens as f64),
             format_number(data.cache_creation_tokens as f64),
             format_number(data.cache_read_tokens as f64),
-            format_number(total_tokens as f64),
+            format_number(data.total_tokens as f64),
             format_currency(data.total_cost),
         ],
         TableMode::Compact => vec![
@@ -141,14 +134,6 @@ pub fn build_usage_row(
 }
 
 pub fn build_totals_row(totals: &UsageDataRow, mode: TableMode) -> Vec<String> {
-    let totals_counts = AggregatedTokenCounts {
-        input_tokens: totals.input_tokens,
-        output_tokens: totals.output_tokens,
-        cache_creation_tokens: totals.cache_creation_tokens,
-        cache_read_tokens: totals.cache_read_tokens,
-    };
-    let total_tokens = get_total_tokens_from_aggregated(totals_counts);
-
     match mode {
         TableMode::Full => vec![
             "Total".to_string(),
@@ -157,7 +142,7 @@ pub fn build_totals_row(totals: &UsageDataRow, mode: TableMode) -> Vec<String> {
             format_number(totals.output_tokens as f64),
             format_number(totals.cache_creation_tokens as f64),
             format_number(totals.cache_read_tokens as f64),
-            format_number(total_tokens as f64),
+            format_number(totals.total_tokens as f64),
             format_currency(totals.total_cost),
         ],
         TableMode::Compact => vec![
@@ -173,13 +158,6 @@ pub fn build_totals_row(totals: &UsageDataRow, mode: TableMode) -> Vec<String> {
 pub fn build_breakdown_rows(breakdowns: &[ModelBreakdownRow], mode: TableMode) -> Vec<Vec<String>> {
     let mut rows = Vec::new();
     for breakdown in breakdowns {
-        let totals = AggregatedTokenCounts {
-            input_tokens: breakdown.input_tokens,
-            output_tokens: breakdown.output_tokens,
-            cache_creation_tokens: breakdown.cache_creation_tokens,
-            cache_read_tokens: breakdown.cache_read_tokens,
-        };
-        let total_tokens = get_total_tokens_from_aggregated(totals);
         match mode {
             TableMode::Full => rows.push(vec![
                 format!("  |- {}", format_model_name(&breakdown.model_name)),
@@ -188,7 +166,7 @@ pub fn build_breakdown_rows(breakdowns: &[ModelBreakdownRow], mode: TableMode) -
                 format_number(breakdown.output_tokens as f64),
                 format_number(breakdown.cache_creation_tokens as f64),
                 format_number(breakdown.cache_read_tokens as f64),
-                format_number(total_tokens as f64),
+                format_number(breakdown.total_tokens as f64),
                 format_currency(breakdown.cost),
             ]),
             TableMode::Compact => rows.push(vec![

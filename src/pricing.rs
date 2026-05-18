@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::sync::OnceLock;
 
 const DEFAULT_TIERED_THRESHOLD: u64 = 200_000;
+const MILLION: f64 = 1_000_000.0;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LiteLLMModelPricing {
@@ -16,6 +17,12 @@ pub struct LiteLLMModelPricing {
     pub cache_creation_input_token_cost_above_200k_tokens: Option<f64>,
     pub cache_read_input_token_cost_above_200k_tokens: Option<f64>,
     pub max_input_tokens: Option<u64>,
+    pub provider_specific_entry: Option<ProviderSpecificEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderSpecificEntry {
+    pub fast: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,6 +274,51 @@ impl PricingFetcher {
         };
 
         self.calculate_cost_from_pricing(tokens, &pricing)
+    }
+
+    pub fn calculate_codex_cost_from_tokens(
+        &self,
+        tokens: &UsageTokens,
+        model_name: Option<&str>,
+        fast_speed: bool,
+    ) -> f64 {
+        let model_name = match model_name {
+            Some(name) if !name.is_empty() => name,
+            _ => return 0.0,
+        };
+
+        let pricing = match self.get_model_pricing(model_name) {
+            Some(pricing) => pricing,
+            None => return 0.0,
+        };
+
+        let non_cached_input_tokens = tokens
+            .input_tokens
+            .saturating_sub(tokens.cache_read_input_tokens);
+        let multiplier = if fast_speed {
+            pricing
+                .provider_specific_entry
+                .as_ref()
+                .and_then(|entry| entry.fast)
+                .unwrap_or(2.0)
+        } else {
+            1.0
+        };
+
+        let input_cost_per_million =
+            pricing.input_cost_per_token.unwrap_or(0.0) * MILLION * multiplier;
+        let cached_input_cost_per_million = pricing
+            .cache_read_input_token_cost
+            .or(pricing.input_cost_per_token)
+            .unwrap_or(0.0)
+            * MILLION
+            * multiplier;
+        let output_cost_per_million =
+            pricing.output_cost_per_token.unwrap_or(0.0) * MILLION * multiplier;
+
+        (non_cached_input_tokens as f64 / MILLION) * input_cost_per_million
+            + (tokens.cache_read_input_tokens as f64 / MILLION) * cached_input_cost_per_million
+            + (tokens.output_tokens as f64 / MILLION) * output_cost_per_million
     }
 }
 

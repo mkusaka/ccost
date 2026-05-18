@@ -435,6 +435,7 @@ fn usage_row_from_daily(entry: &DailyUsage) -> UsageDataRow {
         output_tokens: entry.output_tokens,
         cache_creation_tokens: entry.cache_creation_tokens,
         cache_read_tokens: entry.cache_read_tokens,
+        total_tokens: entry.total_tokens,
         total_cost: entry.total_cost,
         models_used: entry.models_used.clone(),
     }
@@ -446,6 +447,7 @@ fn usage_row_from_monthly(entry: &MonthlyUsage) -> UsageDataRow {
         output_tokens: entry.output_tokens,
         cache_creation_tokens: entry.cache_creation_tokens,
         cache_read_tokens: entry.cache_read_tokens,
+        total_tokens: entry.total_tokens,
         total_cost: entry.total_cost,
         models_used: entry.models_used.clone(),
     }
@@ -457,6 +459,7 @@ fn usage_row_from_totals(totals: &UsageTotals) -> UsageDataRow {
         output_tokens: totals.output_tokens,
         cache_creation_tokens: totals.cache_creation_tokens,
         cache_read_tokens: totals.cache_read_tokens,
+        total_tokens: totals.total_tokens(),
         total_cost: totals.total_cost,
         models_used: Vec::new(),
     }
@@ -471,6 +474,7 @@ fn breakdown_rows_from_breakdowns(breakdowns: &[ModelBreakdown]) -> Vec<ModelBre
             output_tokens: b.output_tokens,
             cache_creation_tokens: b.cache_creation_tokens,
             cache_read_tokens: b.cache_read_tokens,
+            total_tokens: b.total_tokens,
             cost: b.cost,
         })
         .collect()
@@ -488,17 +492,13 @@ fn totals_output(totals: UsageTotals) -> TotalsOutput {
 }
 
 fn daily_entry_output(entry: DailyUsage, include_project: bool) -> DailyEntryOutput {
-    let total_tokens = entry.input_tokens
-        + entry.output_tokens
-        + entry.cache_creation_tokens
-        + entry.cache_read_tokens;
     DailyEntryOutput {
         date: entry.date,
         input_tokens: entry.input_tokens,
         output_tokens: entry.output_tokens,
         cache_creation_tokens: entry.cache_creation_tokens,
         cache_read_tokens: entry.cache_read_tokens,
-        total_tokens,
+        total_tokens: entry.total_tokens,
         total_cost: entry.total_cost,
         models_used: entry.models_used,
         model_breakdowns: entry
@@ -511,17 +511,13 @@ fn daily_entry_output(entry: DailyUsage, include_project: bool) -> DailyEntryOut
 }
 
 fn monthly_entry_output(entry: MonthlyUsage) -> MonthlyEntryOutput {
-    let total_tokens = entry.input_tokens
-        + entry.output_tokens
-        + entry.cache_creation_tokens
-        + entry.cache_read_tokens;
     MonthlyEntryOutput {
         month: entry.month,
         input_tokens: entry.input_tokens,
         output_tokens: entry.output_tokens,
         cache_creation_tokens: entry.cache_creation_tokens,
         cache_read_tokens: entry.cache_read_tokens,
-        total_tokens,
+        total_tokens: entry.total_tokens,
         total_cost: entry.total_cost,
         models_used: entry.models_used,
         model_breakdowns: entry
