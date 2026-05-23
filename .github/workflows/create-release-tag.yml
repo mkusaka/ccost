@@ -1,7 +1,5 @@
 name: Create release tag
-
 run-name: Create ${{ inputs.bump }} release tag by @${{ github.actor }}
-
 on:
   workflow_dispatch:
     inputs:
@@ -14,13 +12,10 @@ on:
           - major
           - minor
           - patch
-
 permissions: {}
-
 concurrency:
   group: create-release-tag
   cancel-in-progress: false
-
 jobs:
   create:
     name: Create release tag
@@ -38,18 +33,19 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.repository.default_branch }}
-
+          persist-credentials: false
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: stable
-
       - name: Create version bump commit and tag
         id: version
         env:
           BUMP: ${{ inputs.bump }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          gh auth setup-git
 
           git fetch --force origin "$DEFAULT_BRANCH" --tags
           git pull --ff-only origin "$DEFAULT_BRANCH"
@@ -118,13 +114,11 @@ jobs:
             echo "version=$NEXT_VERSION"
             echo "tag=$NEXT_TAG"
           } >> "$GITHUB_OUTPUT"
-
       - name: Dispatch release workflow
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: gh workflow run release.yml --ref "$RELEASE_TAG"
-
       - name: Write summary
         env:
           LATEST_TAG: ${{ steps.version.outputs.latest_tag }}
@@ -134,3 +128,4 @@ jobs:
             echo "Created ${RELEASE_TAG} from ${LATEST_TAG}."
             echo "Dispatched release.yml for ${RELEASE_TAG}."
           } >> "$GITHUB_STEP_SUMMARY"
+    timeout-minutes: 90
