@@ -135,16 +135,24 @@ struct TotalsOutput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct DailyMetadataOutput {
+    agents: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DailyEntryOutput {
-    date: String,
-    input_tokens: u64,
-    output_tokens: u64,
+    agent: String,
     cache_creation_tokens: u64,
     cache_read_tokens: u64,
-    total_tokens: u64,
-    total_cost: f64,
-    models_used: Vec<String>,
+    input_tokens: u64,
+    metadata: DailyMetadataOutput,
     model_breakdowns: Vec<ModelBreakdownOutput>,
+    models_used: Vec<String>,
+    output_tokens: u64,
+    period: String,
+    total_cost: f64,
+    total_tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     project: Option<String>,
 }
@@ -493,19 +501,21 @@ fn totals_output(totals: UsageTotals) -> TotalsOutput {
 
 fn daily_entry_output(entry: DailyUsage, include_project: bool) -> DailyEntryOutput {
     DailyEntryOutput {
-        date: entry.date,
-        input_tokens: entry.input_tokens,
-        output_tokens: entry.output_tokens,
+        agent: "all".to_string(),
         cache_creation_tokens: entry.cache_creation_tokens,
         cache_read_tokens: entry.cache_read_tokens,
-        total_tokens: entry.total_tokens,
-        total_cost: entry.total_cost,
-        models_used: entry.models_used,
+        input_tokens: entry.input_tokens,
+        metadata: DailyMetadataOutput { agents: vec![] },
         model_breakdowns: entry
             .model_breakdowns
             .into_iter()
             .map(model_breakdown_output)
             .collect(),
+        models_used: entry.models_used,
+        output_tokens: entry.output_tokens,
+        period: entry.date,
+        total_cost: entry.total_cost,
+        total_tokens: entry.total_tokens,
         project: if include_project { entry.project } else { None },
     }
 }
