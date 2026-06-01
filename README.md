@@ -147,16 +147,23 @@ ccusage for those commands.
 
 ## Release
 
+Full release steps:
+
+1. Bump the version in `Cargo.toml`
+2. Run `cargo build` to update `Cargo.lock`
+3. Commit, open a PR, and merge to `main`
+4. Create and push the tag (must match `Cargo.toml`):
+
+```bash
+git tag v0.1.x
+git push origin v0.1.x
+```
+
 Pushing a `v*` tag runs the release workflow. It validates that the tag matches
 `Cargo.toml`, creates a GitHub Release, builds Homebrew bottles for Apple
 Silicon and Intel Macs on macOS 15 and 26, uploads them to the release, and
 updates `mkusaka/homebrew-tap`. The workflow requires the
 `HOMEBREW_TAP_TOKEN` repository secret.
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
 
 ## Development
 
