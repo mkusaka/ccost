@@ -378,6 +378,7 @@
       "search_context_size_low": 0.01,
       "search_context_size_medium": 0.01
     },
+    "supports_adaptive_thinking": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
