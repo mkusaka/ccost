@@ -1619,8 +1619,6 @@
     "output_cost_per_token": 1e-05,
     "output_cost_per_token_flex": 5e-06,
     "output_cost_per_token_priority": 2e-05,
-    "regional_processing_uplift_multiplier_eu": 1.1,
-    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/chat/completions",
       "/v1/batch",
@@ -1811,8 +1809,6 @@
     "output_cost_per_token": 2e-06,
     "output_cost_per_token_flex": 1e-06,
     "output_cost_per_token_priority": 3.6e-06,
-    "regional_processing_uplift_multiplier_eu": 1.1,
-    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/chat/completions",
       "/v1/batch",
@@ -1894,8 +1890,6 @@
     "max_input_tokens": 272000,
     "max_output_tokens": 128000,
     "max_tokens": 128000,
-    "regional_processing_uplift_multiplier_eu": 1.1,
-    "regional_processing_uplift_multiplier_us": 1.1,
     "mode": "chat",
     "output_cost_per_token": 4e-07,
     "output_cost_per_token_flex": 2e-07,
@@ -1975,8 +1969,6 @@
     "mode": "responses",
     "output_cost_per_token": 0.00012,
     "output_cost_per_token_batches": 6e-05,
-    "regional_processing_uplift_multiplier_eu": 1.1,
-    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/batch",
       "/v1/responses"
@@ -2629,6 +2621,8 @@
     "output_cost_per_token_flex": 7.5e-06,
     "output_cost_per_token_batches": 7.5e-06,
     "output_cost_per_token_priority": 3e-05,
+    "regional_processing_uplift_multiplier_eu": 1.1,
+    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/chat/completions",
       "/v1/batch",
@@ -2676,6 +2670,8 @@
     "output_cost_per_token_flex": 7.5e-06,
     "output_cost_per_token_batches": 7.5e-06,
     "output_cost_per_token_priority": 3e-05,
+    "regional_processing_uplift_multiplier_eu": 1.1,
+    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/chat/completions",
       "/v1/batch",
@@ -2718,6 +2714,8 @@
     "output_cost_per_token_flex": 2.25e-06,
     "output_cost_per_token_batches": 2.25e-06,
     "output_cost_per_token_priority": 9e-06,
+    "regional_processing_uplift_multiplier_eu": 1.1,
+    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/chat/completions",
       "/v1/batch",
@@ -2764,6 +2762,8 @@
     "output_cost_per_token_flex": 2.25e-06,
     "output_cost_per_token_batches": 2.25e-06,
     "output_cost_per_token_priority": 9e-06,
+    "regional_processing_uplift_multiplier_eu": 1.1,
+    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/chat/completions",
       "/v1/batch",
@@ -2807,6 +2807,8 @@
     "output_cost_per_token": 1.25e-06,
     "output_cost_per_token_flex": 6.25e-07,
     "output_cost_per_token_batches": 6.25e-07,
+    "regional_processing_uplift_multiplier_eu": 1.1,
+    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/chat/completions",
       "/v1/batch",
@@ -2850,6 +2852,8 @@
     "output_cost_per_token": 1.25e-06,
     "output_cost_per_token_flex": 6.25e-07,
     "output_cost_per_token_batches": 6.25e-07,
+    "regional_processing_uplift_multiplier_eu": 1.1,
+    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/chat/completions",
       "/v1/batch",
@@ -2894,6 +2898,8 @@
     "output_cost_per_token_above_272k_tokens": 0.00027,
     "output_cost_per_token_flex": 9e-05,
     "output_cost_per_token_batches": 9e-05,
+    "regional_processing_uplift_multiplier_eu": 1.1,
+    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/responses",
       "/v1/batch"
@@ -2937,6 +2943,8 @@
     "output_cost_per_token_above_272k_tokens": 0.00027,
     "output_cost_per_token_flex": 9e-05,
     "output_cost_per_token_batches": 9e-05,
+    "regional_processing_uplift_multiplier_eu": 1.1,
+    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/responses",
       "/v1/batch"
@@ -2984,6 +2992,8 @@
     "output_cost_per_token_flex": 1.5e-05,
     "output_cost_per_token_batches": 1.5e-05,
     "output_cost_per_token_priority": 6e-05,
+    "regional_processing_uplift_multiplier_eu": 1.1,
+    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/chat/completions",
       "/v1/batch",
@@ -3032,6 +3042,8 @@
     "output_cost_per_token_flex": 1.5e-05,
     "output_cost_per_token_batches": 1.5e-05,
     "output_cost_per_token_priority": 6e-05,
+    "regional_processing_uplift_multiplier_eu": 1.1,
+    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/chat/completions",
       "/v1/batch",
@@ -3076,6 +3088,8 @@
     "output_cost_per_token_above_272k_tokens": 0.00027,
     "output_cost_per_token_flex": 9e-05,
     "output_cost_per_token_batches": 9e-05,
+    "regional_processing_uplift_multiplier_eu": 1.1,
+    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/responses",
       "/v1/batch"
@@ -3120,6 +3134,8 @@
     "output_cost_per_token_above_272k_tokens": 0.00027,
     "output_cost_per_token_flex": 9e-05,
     "output_cost_per_token_batches": 9e-05,
+    "regional_processing_uplift_multiplier_eu": 1.1,
+    "regional_processing_uplift_multiplier_us": 1.1,
     "supported_endpoints": [
       "/v1/responses",
       "/v1/batch"
