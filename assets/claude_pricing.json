@@ -899,7 +899,8 @@
       "fast": 6.0
     },
     "supports_output_config": true,
-    "supports_max_reasoning_effort": true
+    "supports_max_reasoning_effort": true,
+    "supports_speed": true
   },
   "claude-opus-4-6-20260205": {
     "cache_creation_input_token_cost": 6.25e-06,
@@ -932,7 +933,8 @@
       "fast": 6.0
     },
     "supports_max_reasoning_effort": true,
-    "supports_output_config": true
+    "supports_output_config": true,
+    "supports_speed": true
   },
   "claude-opus-4-7": {
     "cache_creation_input_token_cost": 6.25e-06,
@@ -967,7 +969,8 @@
       "us": 1.1,
       "fast": 6.0
     },
-    "supports_output_config": true
+    "supports_output_config": true,
+    "supports_speed": true
   },
   "claude-opus-4-7-20260416": {
     "cache_creation_input_token_cost": 6.25e-06,
@@ -1002,7 +1005,8 @@
       "us": 1.1,
       "fast": 6.0
     },
-    "supports_output_config": true
+    "supports_output_config": true,
+    "supports_speed": true
   },
   "claude-opus-4-8": {
     "cache_creation_input_token_cost": 6.25e-06,
@@ -1037,7 +1041,8 @@
       "us": 1.1,
       "fast": 2.0
     },
-    "supports_output_config": true
+    "supports_output_config": true,
+    "supports_speed": true
   },
   "claude-sonnet-4-20250514": {
     "deprecation_date": "2026-05-14",
