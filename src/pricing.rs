@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 
 const DEFAULT_TIERED_THRESHOLD: u64 = 200_000;
 const MILLION: f64 = 1_000_000.0;
+const DEFAULT_CODEX_FAST_MULTIPLIER: f64 = 2.0;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LiteLLMModelPricing {
@@ -300,7 +301,7 @@ impl PricingFetcher {
                 .provider_specific_entry
                 .as_ref()
                 .and_then(|entry| entry.fast)
-                .unwrap_or(2.0)
+                .unwrap_or_else(|| codex_fast_multiplier_for_model(model_name))
         } else {
             1.0
         };
@@ -319,6 +320,13 @@ impl PricingFetcher {
         (non_cached_input_tokens as f64 / MILLION) * input_cost_per_million
             + (tokens.cache_read_input_tokens as f64 / MILLION) * cached_input_cost_per_million
             + (tokens.output_tokens as f64 / MILLION) * output_cost_per_million
+    }
+}
+
+fn codex_fast_multiplier_for_model(model_name: &str) -> f64 {
+    match model_name {
+        "gpt-5.5" | "gpt-5.5-2026-04-23" => 2.5,
+        _ => DEFAULT_CODEX_FAST_MULTIPLIER,
     }
 }
 
@@ -362,6 +370,23 @@ mod tests {
         };
         let cost = fetcher.calculate_cost_from_tokens(&tokens, Some("gpt-5-codex"));
         assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn calculate_codex_cost_applies_gpt_5_5_fast_multiplier() {
+        let fetcher = PricingFetcher::new();
+        let tokens = UsageTokens {
+            input_tokens: 1_000_000,
+            output_tokens: 10_000,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 400_000,
+        };
+
+        let standard = fetcher.calculate_codex_cost_from_tokens(&tokens, Some("gpt-5.5"), false);
+        let fast = fetcher.calculate_codex_cost_from_tokens(&tokens, Some("gpt-5.5"), true);
+
+        assert!((standard - 3.5).abs() < 1e-12);
+        assert!((fast - standard * 2.5).abs() < 1e-12);
     }
 
     #[test]
