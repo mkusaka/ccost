@@ -1,0 +1,4 @@
+interface:
+  display_name: "ccost"
+  short_description: "Inspect Claude Code, Codex, and OpenCode usage costs"
+  default_prompt: "Use $ccost to summarize my recent Claude Code, Codex, or OpenCode usage costs."

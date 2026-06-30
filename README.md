@@ -63,6 +63,21 @@ Install via Cargo:
 cargo install --git https://github.com/mkusaka/ccost
 ```
 
+Install the Codex skill:
+
+```bash
+npx skills add mkusaka/ccost --skill ccost --agent codex --global
+```
+
+The skill helps Codex choose and interpret `ccost` commands. It does not install
+the `ccost` binary itself, so install `ccost` with Homebrew or Cargo first.
+
+To inspect the skill before installing:
+
+```bash
+npx skills add mkusaka/ccost --list
+```
+
 ## Usage
 
 Daily:
