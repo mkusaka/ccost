@@ -293,9 +293,7 @@ impl PricingFetcher {
             None => return 0.0,
         };
 
-        let non_cached_input_tokens = tokens
-            .input_tokens
-            .saturating_sub(tokens.cache_read_input_tokens);
+        let non_cached_input_tokens = tokens.input_tokens;
         let multiplier = if fast_speed {
             pricing
                 .provider_specific_entry
@@ -376,7 +374,7 @@ mod tests {
     fn calculate_codex_cost_applies_gpt_5_5_fast_multiplier() {
         let fetcher = PricingFetcher::new();
         let tokens = UsageTokens {
-            input_tokens: 1_000_000,
+            input_tokens: 600_000,
             output_tokens: 10_000,
             cache_creation_input_tokens: 0,
             cache_read_input_tokens: 400_000,

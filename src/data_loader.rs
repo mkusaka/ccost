@@ -1196,8 +1196,9 @@ fn subtract_codex_usage(
 
 fn codex_usage_to_tokens(delta: &CodexRawUsage) -> UsageTokens {
     let cached = delta.cached_input_tokens.min(delta.input_tokens);
+    let input = delta.input_tokens.saturating_sub(cached);
     UsageTokens {
-        input_tokens: delta.input_tokens,
+        input_tokens: input,
         output_tokens: delta.output_tokens,
         cache_creation_input_tokens: 0,
         cache_read_input_tokens: cached,
@@ -3415,12 +3416,63 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].date, "2025-01-10");
-        assert_eq!(result[0].input_tokens, 2000);
+        assert_eq!(result[0].input_tokens, 1500);
         assert_eq!(result[0].cache_read_tokens, 500);
         assert_eq!(result[0].output_tokens, 600);
         assert_eq!(result[0].total_tokens, 2600);
         assert!(result[0].total_cost > 0.0);
         assert!(result[0].models_used.iter().any(|m| m == "gpt-5-codex"));
+    }
+
+    #[test]
+    fn load_daily_usage_reports_uncached_codex_input() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "sessions/session-1.jsonl",
+            &[
+                json!({
+                    "timestamp": "2025-01-10T10:00:00Z",
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5-codex" }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2025-01-10T10:00:01Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 100,
+                                "cached_input_tokens": 90,
+                                "output_tokens": 5,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 105
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            codex: true,
+            claudecode: false,
+            codex_path: Some(fixture.path().join("sessions")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Calculate,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].input_tokens, 10);
+        assert_eq!(result[0].cache_read_tokens, 90);
+        assert_eq!(result[0].output_tokens, 5);
+        assert_eq!(result[0].total_tokens, 105);
     }
 
     #[test]
@@ -3505,7 +3557,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].input_tokens, 600);
+        assert_eq!(result[0].input_tokens, 400);
         assert_eq!(result[0].cache_read_tokens, 200);
         assert_eq!(result[0].output_tokens, 250);
         assert_eq!(result[0].total_tokens, 850);
@@ -3546,7 +3598,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].input_tokens, 1000);
+        assert_eq!(result[0].input_tokens, 900);
         assert_eq!(result[0].cache_read_tokens, 100);
         assert_eq!(result[0].output_tokens, 200);
         assert_eq!(result[0].total_tokens, 1200);
@@ -3753,7 +3805,7 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].date, "2025-01-10");
-        assert_eq!(result[0].input_tokens, 1100);
+        assert_eq!(result[0].input_tokens, 1000);
         assert_eq!(result[0].output_tokens, 250);
         assert_eq!(result[0].cache_read_tokens, 100);
         assert_eq!(result[0].total_tokens, 1350);
