@@ -163,6 +163,7 @@
       "search_context_size_medium": 0.01
     },
     "supports_adaptive_thinking": true,
+    "supports_mid_conversation_system": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
@@ -404,6 +405,7 @@
   "anthropic.claude-opus-4-8": {
     "bedrock_converse_supports_strict_tools": false,
     "supports_adaptive_thinking": true,
+    "supports_mid_conversation_system": true,
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -547,6 +549,7 @@
       "search_context_size_medium": 0.01
     },
     "supports_adaptive_thinking": true,
+    "supports_mid_conversation_system": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
