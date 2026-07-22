@@ -59,7 +59,21 @@ pub fn format_number(num: f64) -> String {
 }
 
 pub fn format_currency(amount: f64) -> String {
-    format!("${amount:.2}")
+    if !amount.is_finite() {
+        return format!("${amount:.2}");
+    }
+
+    let rounded = format!("{amount:.2}");
+    let (sign, rest) = rounded
+        .strip_prefix('-')
+        .map_or(("", rounded.as_str()), |value| ("-", value));
+    let (int_part, frac_part) = rest.split_once('.').expect("currency has two decimals");
+    let grouped = int_part.parse::<u128>().map_or_else(
+        |_| int_part.to_string(),
+        |value| value.to_formatted_string(&Locale::en),
+    );
+
+    format!("${sign}{grouped}.{frac_part}")
 }
 
 fn format_model_name(model_name: &str) -> String {
@@ -214,7 +228,8 @@ mod tests {
     fn format_currency_formats_amounts() {
         assert_eq!(format_currency(10.0), "$10.00");
         assert_eq!(format_currency(100.5), "$100.50");
-        assert_eq!(format_currency(1234.56), "$1234.56");
+        assert_eq!(format_currency(1234.56), "$1,234.56");
+        assert_eq!(format_currency(53887.29), "$53,887.29");
     }
 
     #[test]
@@ -222,6 +237,7 @@ mod tests {
         assert_eq!(format_currency(0.0), "$0.00");
         assert_eq!(format_currency(-10.0), "$-10.00");
         assert_eq!(format_currency(-100.5), "$-100.50");
+        assert_eq!(format_currency(-1234.56), "$-1,234.56");
     }
 
     #[test]
