@@ -40,6 +40,12 @@ pub enum TableMode {
     Compact,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum TokenFormat {
+    Exact,
+    HumanReadable,
+}
+
 pub fn format_number(num: f64) -> String {
     if num.is_nan() || num.is_infinite() {
         return num.to_string();
@@ -56,6 +62,40 @@ pub fn format_number(num: f64) -> String {
     } else {
         format!("{sign}{grouped}.{frac_part}")
     }
+}
+
+pub fn format_tokens(tokens: u64, format: TokenFormat) -> String {
+    if matches!(format, TokenFormat::Exact) {
+        return tokens.to_formatted_string(&Locale::en);
+    }
+
+    const UNITS: &[(u64, &str)] = &[(1_000, "K"), (1_000_000, "M"), (1_000_000_000, "B")];
+
+    let Some(mut unit_index) = UNITS.iter().rposition(|(divisor, _)| tokens >= *divisor) else {
+        return tokens.to_string();
+    };
+
+    let mut rounded = rounded_hundredths(tokens, UNITS[unit_index].0);
+    if rounded >= 100_000 && unit_index + 1 < UNITS.len() {
+        unit_index += 1;
+        rounded = rounded_hundredths(tokens, UNITS[unit_index].0);
+    }
+
+    let whole = rounded / 100;
+    let fraction = rounded % 100;
+    let compact = match fraction {
+        0 => whole.to_string(),
+        value if value % 10 == 0 => format!("{whole}.{}", value / 10),
+        value => format!("{whole}.{value:02}"),
+    };
+    let suffix = UNITS[unit_index].1;
+    format!("{compact}{suffix}")
+}
+
+fn rounded_hundredths(tokens: u64, divisor: u64) -> u64 {
+    let whole = tokens / divisor;
+    let remainder = tokens % divisor;
+    whole * 100 + (remainder * 100 + divisor / 2) / divisor
 }
 
 pub fn format_currency(amount: f64) -> String {
@@ -124,69 +164,78 @@ pub fn build_usage_row(
     first_column_value: &str,
     data: &UsageDataRow,
     mode: TableMode,
+    token_format: TokenFormat,
 ) -> Vec<String> {
     match mode {
         TableMode::Full => vec![
             first_column_value.to_string(),
             format_models_display_multiline(&data.models_used),
-            format_number(data.input_tokens as f64),
-            format_number(data.output_tokens as f64),
-            format_number(data.cache_creation_tokens as f64),
-            format_number(data.cache_read_tokens as f64),
-            format_number(data.total_tokens as f64),
+            format_tokens(data.input_tokens, token_format),
+            format_tokens(data.output_tokens, token_format),
+            format_tokens(data.cache_creation_tokens, token_format),
+            format_tokens(data.cache_read_tokens, token_format),
+            format_tokens(data.total_tokens, token_format),
             format_currency(data.total_cost),
         ],
         TableMode::Compact => vec![
             first_column_value.to_string(),
             format_models_display_multiline(&data.models_used),
-            format_number(data.input_tokens as f64),
-            format_number(data.output_tokens as f64),
+            format_tokens(data.input_tokens, token_format),
+            format_tokens(data.output_tokens, token_format),
             format_currency(data.total_cost),
         ],
     }
 }
 
-pub fn build_totals_row(totals: &UsageDataRow, mode: TableMode) -> Vec<String> {
+pub fn build_totals_row(
+    totals: &UsageDataRow,
+    mode: TableMode,
+    token_format: TokenFormat,
+) -> Vec<String> {
     match mode {
         TableMode::Full => vec![
             "Total".to_string(),
             String::new(),
-            format_number(totals.input_tokens as f64),
-            format_number(totals.output_tokens as f64),
-            format_number(totals.cache_creation_tokens as f64),
-            format_number(totals.cache_read_tokens as f64),
-            format_number(totals.total_tokens as f64),
+            format_tokens(totals.input_tokens, token_format),
+            format_tokens(totals.output_tokens, token_format),
+            format_tokens(totals.cache_creation_tokens, token_format),
+            format_tokens(totals.cache_read_tokens, token_format),
+            format_tokens(totals.total_tokens, token_format),
             format_currency(totals.total_cost),
         ],
         TableMode::Compact => vec![
             "Total".to_string(),
             String::new(),
-            format_number(totals.input_tokens as f64),
-            format_number(totals.output_tokens as f64),
+            format_tokens(totals.input_tokens, token_format),
+            format_tokens(totals.output_tokens, token_format),
             format_currency(totals.total_cost),
         ],
     }
 }
 
-pub fn build_breakdown_rows(breakdowns: &[ModelBreakdownRow], mode: TableMode) -> Vec<Vec<String>> {
+pub fn build_breakdown_rows(
+    breakdowns: &[ModelBreakdownRow],
+    mode: TableMode,
+    token_format: TokenFormat,
+) -> Vec<Vec<String>> {
     let mut rows = Vec::new();
     for breakdown in breakdowns {
         match mode {
             TableMode::Full => rows.push(vec![
                 format!("  |- {}", format_model_name(&breakdown.model_name)),
                 String::new(),
-                format_number(breakdown.input_tokens as f64),
-                format_number(breakdown.output_tokens as f64),
-                format_number(breakdown.cache_creation_tokens as f64),
-                format_number(breakdown.cache_read_tokens as f64),
-                format_number(breakdown.total_tokens as f64),
+                format_tokens(breakdown.input_tokens, token_format),
+                format_tokens(breakdown.output_tokens, token_format),
+                format_tokens(breakdown.cache_creation_tokens, token_format),
+                format_tokens(breakdown.cache_read_tokens, token_format),
+                format_tokens(breakdown.total_tokens, token_format),
                 format_currency(breakdown.cost),
             ]),
             TableMode::Compact => rows.push(vec![
                 format!("  |- {}", format_model_name(&breakdown.model_name)),
                 String::new(),
-                format_number(breakdown.input_tokens as f64),
-                format_number(breakdown.output_tokens as f64),
+                format_tokens(breakdown.input_tokens, token_format),
+                format_tokens(breakdown.output_tokens, token_format),
                 format_currency(breakdown.cost),
             ]),
         }
@@ -222,6 +271,53 @@ mod tests {
     fn format_number_handles_decimals() {
         assert_eq!(format_number(1234.56), "1,234.56");
         assert_eq!(format_number(0.123), "0.123");
+    }
+
+    #[test]
+    fn format_tokens_uses_uppercase_compact_units() {
+        assert_eq!(format_tokens(999, TokenFormat::HumanReadable), "999");
+        assert_eq!(format_tokens(1_000, TokenFormat::HumanReadable), "1K");
+        assert_eq!(format_tokens(1_234, TokenFormat::HumanReadable), "1.23K");
+        assert_eq!(format_tokens(999_999, TokenFormat::HumanReadable), "1M");
+        assert_eq!(
+            format_tokens(1_234_567, TokenFormat::HumanReadable),
+            "1.23M"
+        );
+        assert_eq!(
+            format_tokens(69_960_297_352, TokenFormat::HumanReadable),
+            "69.96B"
+        );
+    }
+
+    #[test]
+    fn format_tokens_preserves_exact_format_by_default() {
+        assert_eq!(
+            format_tokens(69_960_297_352, TokenFormat::Exact),
+            "69,960,297,352"
+        );
+    }
+
+    #[test]
+    fn usage_rows_apply_human_readable_format_only_to_tokens() {
+        let row = build_usage_row(
+            "2026-07",
+            &UsageDataRow {
+                input_tokens: 1_234,
+                output_tokens: 2_000_000,
+                cache_creation_tokens: 3_000_000_000,
+                cache_read_tokens: 999,
+                total_tokens: 3_002_001_233,
+                total_cost: 12.34,
+                models_used: Vec::new(),
+            },
+            TableMode::Full,
+            TokenFormat::HumanReadable,
+        );
+
+        assert_eq!(
+            row,
+            vec!["2026-07", "", "1.23K", "2M", "3B", "999", "3B", "$12.34"]
+        );
     }
 
     #[test]

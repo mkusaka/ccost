@@ -85,6 +85,7 @@ Daily:
 ```bash
 ccost daily
 ccost daily --json
+ccost daily --kmb
 ccost daily --breakdown
 ccost daily --instances
 ccost daily --project my-project
@@ -98,6 +99,7 @@ Monthly:
 ```bash
 ccost monthly
 ccost monthly --json
+ccost monthly --kmb
 ccost monthly --breakdown
 ccost monthly --agent claudecode
 ccost monthly --since 20250101 --until 20250131
@@ -107,6 +109,7 @@ ccost monthly --timezone UTC
 Common flags:
 
 - `--json`: JSON output
+- `--kmb`: format table token counts with uppercase `K`, `M`, or `B` suffixes (JSON remains raw)
 - `--breakdown`: per-model breakdown
 - `--mode`: `auto` | `calculate` | `display`
 - `--offline`: use bundled pricing data (default; set `--offline=false` to fetch live pricing)

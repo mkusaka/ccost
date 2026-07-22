@@ -5,8 +5,8 @@ use crate::data_loader::{
 };
 use crate::pricing::CostMode;
 use crate::table::{
-    ModelBreakdownRow, TableMode, UsageDataRow, build_breakdown_rows, build_totals_row,
-    build_usage_row,
+    ModelBreakdownRow, TableMode, TokenFormat, UsageDataRow, build_breakdown_rows,
+    build_totals_row, build_usage_row,
 };
 use crate::time_utils::{SortOrder, format_date_compact};
 use anyhow::{Result, anyhow};
@@ -82,6 +82,8 @@ pub struct CommonArgs {
     timezone: Option<String>,
     #[arg(long, default_value_t = false, help = "Force compact mode")]
     compact: bool,
+    #[arg(long, help = "Format table token counts with K, M, or B suffixes")]
+    kmb: bool,
     #[arg(
         long,
         value_enum,
@@ -278,6 +280,7 @@ fn run_daily(args: DailyArgs) -> Result<()> {
     println!("{}", report_title("Daily", &args.common));
 
     let mode = table_mode(args.common.compact);
+    let token_format = token_format(args.common.kmb);
     let mut table = usage_table("Date", mode);
 
     if args.instances && daily.iter().any(|d| d.project.is_some()) {
@@ -293,11 +296,16 @@ fn run_daily(args: DailyArgs) -> Result<()> {
             for entry in entries {
                 let first_col = format_date_compact(&entry.date, args.common.timezone.as_deref())
                     .unwrap_or(entry.date.clone());
-                let row = build_usage_row(&first_col, &usage_row_from_daily(&entry), mode);
+                let row = build_usage_row(
+                    &first_col,
+                    &usage_row_from_daily(&entry),
+                    mode,
+                    token_format,
+                );
                 table.add_row(row);
                 if args.common.breakdown {
                     let breakdowns = breakdown_rows_from_breakdowns(&entry.model_breakdowns);
-                    for breakdown in build_breakdown_rows(&breakdowns, mode) {
+                    for breakdown in build_breakdown_rows(&breakdowns, mode, token_format) {
                         table.add_row(breakdown);
                     }
                 }
@@ -308,18 +316,22 @@ fn run_daily(args: DailyArgs) -> Result<()> {
         for entry in &daily {
             let first_col = format_date_compact(&entry.date, args.common.timezone.as_deref())
                 .unwrap_or(entry.date.clone());
-            let row = build_usage_row(&first_col, &usage_row_from_daily(entry), mode);
+            let row = build_usage_row(&first_col, &usage_row_from_daily(entry), mode, token_format);
             table.add_row(row);
             if args.common.breakdown {
                 let breakdowns = breakdown_rows_from_breakdowns(&entry.model_breakdowns);
-                for breakdown in build_breakdown_rows(&breakdowns, mode) {
+                for breakdown in build_breakdown_rows(&breakdowns, mode, token_format) {
                     table.add_row(breakdown);
                 }
             }
         }
     }
 
-    table.add_row(build_totals_row(&usage_row_from_totals(&totals), mode));
+    table.add_row(build_totals_row(
+        &usage_row_from_totals(&totals),
+        mode,
+        token_format,
+    ));
     println!("{table}");
 
     if matches!(mode, TableMode::Compact) {
@@ -360,20 +372,30 @@ fn run_monthly(args: MonthlyArgs) -> Result<()> {
     println!("{}", report_title("Monthly", &args.common));
 
     let mode = table_mode(args.common.compact);
+    let token_format = token_format(args.common.kmb);
     let mut table = usage_table("Month", mode);
 
     for entry in &monthly {
-        let row = build_usage_row(&entry.month, &usage_row_from_monthly(entry), mode);
+        let row = build_usage_row(
+            &entry.month,
+            &usage_row_from_monthly(entry),
+            mode,
+            token_format,
+        );
         table.add_row(row);
         if args.common.breakdown {
             let breakdowns = breakdown_rows_from_breakdowns(&entry.model_breakdowns);
-            for breakdown in build_breakdown_rows(&breakdowns, mode) {
+            for breakdown in build_breakdown_rows(&breakdowns, mode, token_format) {
                 table.add_row(breakdown);
             }
         }
     }
 
-    table.add_row(build_totals_row(&usage_row_from_totals(&totals), mode));
+    table.add_row(build_totals_row(
+        &usage_row_from_totals(&totals),
+        mode,
+        token_format,
+    ));
     println!("{table}");
 
     if matches!(mode, TableMode::Compact) {
@@ -393,6 +415,14 @@ fn table_mode(force_compact: bool) -> TableMode {
         TableMode::Compact
     } else {
         TableMode::Full
+    }
+}
+
+fn token_format(kmb: bool) -> TokenFormat {
+    if kmb {
+        TokenFormat::HumanReadable
+    } else {
+        TokenFormat::Exact
     }
 }
 
@@ -639,5 +669,31 @@ mod tests {
         let result = Cli::try_parse_from(["ccost", "daily", "--codex=false"]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn kmb_is_opt_in() {
+        assert!(!parse_daily_common(&[]).kmb);
+        assert!(parse_daily_common(&["--kmb"]).kmb);
+
+        let parsed = Cli::try_parse_from(["ccost", "monthly", "--json", "--kmb"]).unwrap();
+        let Command::Monthly(args) = parsed.command else {
+            unreachable!();
+        };
+        assert!(args.common.json);
+        assert!(args.common.kmb);
+    }
+
+    #[test]
+    fn json_totals_keep_raw_numeric_tokens() {
+        let output = totals_output(UsageTotals {
+            input_tokens: 69_960_297_352,
+            total_tokens: 69_960_297_352,
+            ..UsageTotals::default()
+        });
+        let json = serde_json::to_value(output).unwrap();
+
+        assert_eq!(json["inputTokens"].as_u64(), Some(69_960_297_352));
+        assert_eq!(json["totalTokens"].as_u64(), Some(69_960_297_352));
     }
 }

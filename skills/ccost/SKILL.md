@@ -19,7 +19,9 @@ Run the smallest command that answers the user's question:
 ccost daily
 ccost monthly
 ccost daily --json
+ccost daily --kmb
 ccost monthly --json
+ccost monthly --kmb
 ```
 
 If the user omits a period, start with `daily`. Use JSON when the user asks for data to process, precise totals, or a machine-readable answer; use table output for human-readable summaries.
