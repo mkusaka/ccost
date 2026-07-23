@@ -132,8 +132,9 @@ You can override with `CLAUDE_CONFIG_DIR` (comma-separated):
 export CLAUDE_CONFIG_DIR="$HOME/.claude,$HOME/.config/claude"
 ```
 
-Codex default location:
+Codex default locations:
 - `${CODEX_HOME:-~/.codex}/sessions`
+- `${CODEX_HOME:-~/.codex}/archived_sessions`
 
 OpenCode default location:
 - `${OPENCODE_DATA_DIR:-~/.local/share/opencode}/opencode.db` (OpenCode >= 1.2.2)

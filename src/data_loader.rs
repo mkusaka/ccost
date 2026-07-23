@@ -1,9 +1,9 @@
-use crate::pricing::{CostMode, PricingFetcher, UsageTokens};
+use crate::pricing::{CacheCreationTokens, CostMode, PricingFetcher, UsageTokens};
 use crate::time_utils::{
     SortOrder, filter_by_date_range, format_date_with_tz, format_month, sort_by_date,
 };
 use anyhow::{Result, anyhow};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use chrono_tz::Tz;
 use jwalk::WalkDir;
 use memchr::{memchr, memmem};
@@ -22,6 +22,7 @@ const CLAUDE_PROJECTS_DIR_NAME: &str = "projects";
 const DEFAULT_CLAUDE_CODE_PATH: &str = ".claude";
 const CODEX_HOME_ENV: &str = "CODEX_HOME";
 const CODEX_SESSIONS_DIR_NAME: &str = "sessions";
+const CODEX_ARCHIVED_SESSIONS_DIR_NAME: &str = "archived_sessions";
 const CODEX_CONFIG_FILENAME: &str = "config.toml";
 const DEFAULT_CODEX_PATH: &str = ".codex";
 const LEGACY_FALLBACK_CODEX_MODEL: &str = "gpt-5";
@@ -35,6 +36,18 @@ const USAGE_FIELD_MARKER: &[u8] = b"\"usage\"";
 const CODEX_TURN_CONTEXT_MARKER: &[u8] = b"\"turn_context\"";
 const CODEX_TOKEN_COUNT_MARKER: &[u8] = b"\"token_count\"";
 const CODEX_THREAD_SPAWN_MARKER: &[u8] = b"thread_spawn";
+const CODEX_FORKED_FROM_ID_MARKER: &[u8] = b"forked_from_id";
+const CODEX_AUTO_REVIEW_MODEL: &str = "codex-auto-review";
+const ADVISOR_MESSAGE_MARKER: &[u8] = b"\"advisor_message\"";
+const CODEX_AUTO_REVIEW_FALLBACKS: &[(&str, &str)] = &[
+    ("2026-04-23", "gpt-5.5"),
+    ("2026-03-05", "gpt-5.4"),
+    ("2026-02-05", "gpt-5.3-codex"),
+    ("2025-12-11", "gpt-5.2-codex"),
+    ("2025-11-13", "gpt-5.1-codex"),
+    ("2025-09-15", "gpt-5-codex"),
+    ("2025-08-07", "gpt-5"),
+];
 
 fn default_claude_config_path() -> PathBuf {
     if let Some(dir) = dirs::config_dir() {
@@ -66,6 +79,43 @@ struct UsageMessageUsage {
     output_tokens: Option<u64>,
     cache_creation_input_tokens: Option<u64>,
     cache_read_input_tokens: Option<u64>,
+    cache_creation: Option<CacheCreationUsage>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CacheCreationUsage {
+    #[serde(default)]
+    ephemeral_5m_input_tokens: u64,
+    #[serde(default)]
+    ephemeral_1h_input_tokens: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct UsageIterationsEnvelope {
+    message: UsageIterationsMessage,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct UsageIterationsMessage {
+    usage: UsageIterations,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct UsageIterations {
+    #[serde(default)]
+    iterations: Vec<UsageIteration>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct UsageIteration {
+    #[serde(rename = "type")]
+    kind: String,
+    model: Option<String>,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    cache_creation_input_tokens: Option<u64>,
+    cache_read_input_tokens: Option<u64>,
+    cache_creation: Option<CacheCreationUsage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -512,7 +562,6 @@ fn parse_file_records(
         if !is_valid_usage_data(&parsed) {
             return Ok(());
         }
-        let cost = calculate_cost_for_entry(&parsed, options.mode, pricing);
         let timestamp = match parsed.timestamp.as_deref() {
             Some(ts) => ts,
             None => return Ok(()),
@@ -522,29 +571,68 @@ fn parse_file_records(
             None => return Ok(()),
         };
 
-        let message = match parsed.message {
+        let message = match parsed.message.as_ref() {
             Some(message) => message,
             None => return Ok(()),
         };
-        let tokens = match extract_usage_tokens(&message) {
-            Some(tokens) => tokens,
-            None => return Ok(()),
+        let advisor_usages = if line_contains_any_marker(line, &[ADVISOR_MESSAGE_MARKER]) {
+            extract_advisor_usages(line)
+        } else {
+            Vec::new()
         };
-        let total_tokens = total_tokens_from_usage(&tokens);
-        let model = message.model;
+        if let Some((tokens, cache_creation)) = extract_usage_tokens_with_cache_creation(message) {
+            let cost = calculate_cost_for_usage(
+                message.model.as_deref(),
+                &tokens,
+                cache_creation.as_ref(),
+                parsed.cost_usd,
+                options.mode,
+                pricing,
+            );
+            let total_tokens = total_tokens_from_usage(&tokens);
+            let model = message.model.clone();
 
-        records.push(ParsedRecord {
-            unique_hash,
-            message_id,
-            request_id,
-            is_sidechain: parsed.is_sidechain,
-            date,
-            project: project.clone(),
-            model,
-            tokens,
-            total_tokens,
-            cost,
-        });
+            if total_tokens > 0 || !advisor_usages.is_empty() {
+                records.push(ParsedRecord {
+                    unique_hash,
+                    message_id: message_id.clone(),
+                    request_id: request_id.clone(),
+                    is_sidechain: parsed.is_sidechain,
+                    date: date.clone(),
+                    project: project.clone(),
+                    model,
+                    tokens,
+                    total_tokens,
+                    cost,
+                });
+            }
+        }
+
+        for (index, (model, tokens, cache_creation)) in advisor_usages.into_iter().enumerate() {
+            let total_tokens = total_tokens_from_usage(&tokens);
+            let cost = calculate_cost_for_usage(
+                Some(&model),
+                &tokens,
+                cache_creation.as_ref(),
+                None,
+                options.mode,
+                pricing,
+            );
+            records.push(ParsedRecord {
+                unique_hash: None,
+                message_id: message_id
+                    .as_ref()
+                    .map(|message_id| format!("{message_id}:advisor:{index}")),
+                request_id: request_id.clone(),
+                is_sidechain: parsed.is_sidechain,
+                date: date.clone(),
+                project: project.clone(),
+                model: Some(model),
+                tokens,
+                total_tokens,
+                cost,
+            });
+        }
 
         Ok(())
     })?;
@@ -802,26 +890,85 @@ fn is_semver_prefix(version: &str) -> bool {
         .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
 }
 
+#[cfg(test)]
 fn extract_usage_tokens(message: &UsageMessage) -> Option<UsageTokens> {
+    extract_usage_tokens_with_cache_creation(message).map(|(tokens, _)| tokens)
+}
+
+fn extract_usage_tokens_with_cache_creation(
+    message: &UsageMessage,
+) -> Option<(UsageTokens, Option<CacheCreationTokens>)> {
     let usage = message.usage.as_ref()?;
     let input = usage.input_tokens?;
     let output = usage.output_tokens?;
+    let cache_creation = usage
+        .cache_creation
+        .as_ref()
+        .map(|cache| CacheCreationTokens {
+            ephemeral_5m_input_tokens: cache.ephemeral_5m_input_tokens,
+            ephemeral_1h_input_tokens: cache.ephemeral_1h_input_tokens,
+        });
+    let cache_creation_input_tokens = cache_creation
+        .as_ref()
+        .map(|cache| {
+            cache
+                .ephemeral_5m_input_tokens
+                .saturating_add(cache.ephemeral_1h_input_tokens)
+        })
+        .unwrap_or_else(|| usage.cache_creation_input_tokens.unwrap_or(0));
     let tokens = UsageTokens {
         input_tokens: input,
         output_tokens: output,
-        cache_creation_input_tokens: usage.cache_creation_input_tokens.unwrap_or(0),
+        cache_creation_input_tokens,
         cache_read_input_tokens: usage.cache_read_input_tokens.unwrap_or(0),
     };
 
-    if tokens.input_tokens == 0
-        && tokens.output_tokens == 0
-        && tokens.cache_creation_input_tokens == 0
-        && tokens.cache_read_input_tokens == 0
-    {
-        return None;
-    }
+    Some((tokens, cache_creation))
+}
 
-    Some(tokens)
+fn extract_advisor_usages(line: &[u8]) -> Vec<(String, UsageTokens, Option<CacheCreationTokens>)> {
+    let Ok(envelope) = sonic_rs::from_slice::<UsageIterationsEnvelope>(line) else {
+        return Vec::new();
+    };
+    envelope
+        .message
+        .usage
+        .iterations
+        .iter()
+        .filter_map(|iteration| {
+            if iteration.kind != "advisor_message" {
+                return None;
+            }
+            let model = iteration
+                .model
+                .as_ref()
+                .filter(|model| !model.is_empty())?
+                .clone();
+            let cache_creation =
+                iteration
+                    .cache_creation
+                    .as_ref()
+                    .map(|cache| CacheCreationTokens {
+                        ephemeral_5m_input_tokens: cache.ephemeral_5m_input_tokens,
+                        ephemeral_1h_input_tokens: cache.ephemeral_1h_input_tokens,
+                    });
+            let cache_creation_input_tokens = cache_creation
+                .as_ref()
+                .map(|cache| {
+                    cache
+                        .ephemeral_5m_input_tokens
+                        .saturating_add(cache.ephemeral_1h_input_tokens)
+                })
+                .unwrap_or_else(|| iteration.cache_creation_input_tokens.unwrap_or(0));
+            let tokens = UsageTokens {
+                input_tokens: iteration.input_tokens.unwrap_or(0),
+                output_tokens: iteration.output_tokens.unwrap_or(0),
+                cache_creation_input_tokens,
+                cache_read_input_tokens: iteration.cache_read_input_tokens.unwrap_or(0),
+            };
+            (total_tokens_from_usage(&tokens) > 0).then_some((model, tokens, cache_creation))
+        })
+        .collect()
 }
 
 fn total_tokens_from_usage(tokens: &UsageTokens) -> u64 {
@@ -947,52 +1094,69 @@ fn update_model_breakdowns(
     entry.cost += cost;
 }
 
+#[cfg(test)]
 fn calculate_cost_for_entry(
     data: &UsageData,
     mode: CostMode,
     pricing: Option<&PricingFetcher>,
 ) -> f64 {
+    let Some(message) = data.message.as_ref() else {
+        return 0.0;
+    };
+    let Some((tokens, cache_creation)) = extract_usage_tokens_with_cache_creation(message) else {
+        return 0.0;
+    };
+    calculate_cost_for_usage(
+        message.model.as_deref(),
+        &tokens,
+        cache_creation.as_ref(),
+        data.cost_usd,
+        mode,
+        pricing,
+    )
+}
+
+fn calculate_cost_for_usage(
+    model: Option<&str>,
+    tokens: &UsageTokens,
+    cache_creation: Option<&CacheCreationTokens>,
+    cost_usd: Option<f64>,
+    mode: CostMode,
+    pricing: Option<&PricingFetcher>,
+) -> f64 {
     match mode {
-        CostMode::Display => data.cost_usd.unwrap_or(0.0),
-        CostMode::Calculate => {
-            let message = match &data.message {
-                Some(message) => message,
-                None => return 0.0,
-            };
-            let tokens = match extract_usage_tokens(message) {
-                Some(tokens) => tokens,
-                None => return 0.0,
-            };
-            let model = message.model.as_deref();
-            pricing
-                .map(|fetcher| fetcher.calculate_cost_from_tokens(&tokens, model))
-                .unwrap_or(0.0)
-        }
+        CostMode::Display => cost_usd.unwrap_or(0.0),
+        CostMode::Calculate => pricing
+            .map(|fetcher| {
+                fetcher.calculate_cost_from_tokens_with_cache_creation(
+                    tokens,
+                    cache_creation,
+                    model,
+                )
+            })
+            .unwrap_or(0.0),
         CostMode::Auto => {
-            if let Some(cost) = data.cost_usd {
+            if let Some(cost) = cost_usd {
                 return cost;
             }
-            let message = match &data.message {
-                Some(message) => message,
-                None => return 0.0,
-            };
-            let tokens = match extract_usage_tokens(message) {
-                Some(tokens) => tokens,
-                None => return 0.0,
-            };
-            let model = message.model.as_deref();
             pricing
-                .map(|fetcher| fetcher.calculate_cost_from_tokens(&tokens, model))
+                .map(|fetcher| {
+                    fetcher.calculate_cost_from_tokens_with_cache_creation(
+                        tokens,
+                        cache_creation,
+                        model,
+                    )
+                })
                 .unwrap_or(0.0)
         }
     }
 }
 
-fn codex_sessions_dir() -> Option<PathBuf> {
+fn codex_home_dir() -> Option<PathBuf> {
     if let Ok(value) = std::env::var(CODEX_HOME_ENV) {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
-            let dir = PathBuf::from(trimmed).join(CODEX_SESSIONS_DIR_NAME);
+            let dir = PathBuf::from(trimmed);
             if dir.is_dir() {
                 return Some(dir.canonicalize().unwrap_or(dir));
             }
@@ -1000,29 +1164,51 @@ fn codex_sessions_dir() -> Option<PathBuf> {
         }
     }
 
-    let dir = default_codex_home_path().join(CODEX_SESSIONS_DIR_NAME);
+    let dir = default_codex_home_path();
     if dir.is_dir() {
         return Some(dir.canonicalize().unwrap_or(dir));
     }
     None
 }
 
-fn glob_codex_usage_files(sessions_dir: &Path) -> Vec<PathBuf> {
-    WalkDir::new(sessions_dir)
-        .parallelism(jwalk::Parallelism::RayonNewPool(0))
-        .follow_links(true)
+fn codex_usage_dirs(home: &Path) -> Vec<PathBuf> {
+    [CODEX_SESSIONS_DIR_NAME, CODEX_ARCHIVED_SESSIONS_DIR_NAME]
         .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().is_file())
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .map(|ext| ext == "jsonl")
-                .unwrap_or(false)
-        })
-        .map(|entry| entry.path().to_path_buf())
+        .map(|name| home.join(name))
+        .filter(|dir| dir.is_dir())
+        .map(|dir| dir.canonicalize().unwrap_or(dir))
         .collect()
+}
+
+fn glob_codex_usage_files(source_dirs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut seen_relative_paths = HashSet::new();
+    let mut files = Vec::new();
+    for source_dir in source_dirs {
+        let source_files = WalkDir::new(source_dir)
+            .parallelism(jwalk::Parallelism::RayonNewPool(0))
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().is_file())
+            .filter(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .map(|ext| ext == "jsonl")
+                    .unwrap_or(false)
+            })
+            .map(|entry| entry.path().to_path_buf());
+        for file in source_files {
+            let relative = file
+                .strip_prefix(source_dir)
+                .unwrap_or(file.as_path())
+                .to_path_buf();
+            if seen_relative_paths.insert(relative) {
+                files.push(file);
+            }
+        }
+    }
+    files
 }
 
 fn opencode_base_dir() -> Option<PathBuf> {
@@ -1223,9 +1409,8 @@ fn is_codex_fast_service_tier(config: &str) -> bool {
     })
 }
 
-fn resolve_codex_fast_speed(sessions_dir: &Path) -> bool {
-    let config_dir = sessions_dir.parent().unwrap_or(sessions_dir);
-    let config_path = config_dir.join(CODEX_CONFIG_FILENAME);
+fn resolve_codex_fast_speed(codex_home: &Path) -> bool {
+    let config_path = codex_home.join(CODEX_CONFIG_FILENAME);
     std::fs::read_to_string(config_path)
         .map(|config| is_codex_fast_service_tier(&config))
         .unwrap_or(false)
@@ -1250,7 +1435,27 @@ fn is_codex_subagent_session(file: &Path) -> bool {
     let Ok(bytes_read) = file.read(&mut buffer) else {
         return false;
     };
-    memmem::find(&buffer[..bytes_read], CODEX_THREAD_SPAWN_MARKER).is_some()
+    let prefix = &buffer[..bytes_read];
+    memmem::find(prefix, CODEX_THREAD_SPAWN_MARKER).is_some()
+        || memmem::find(prefix, CODEX_FORKED_FROM_ID_MARKER).is_some()
+}
+
+fn resolve_codex_auto_review_model(model: &str, timestamp: &str) -> String {
+    if model != CODEX_AUTO_REVIEW_MODEL {
+        return model.to_string();
+    }
+    let Some(date) = timestamp.get(..10).and_then(|value| {
+        NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .ok()
+            .map(|_| value)
+    }) else {
+        return LEGACY_FALLBACK_CODEX_MODEL.to_string();
+    };
+    CODEX_AUTO_REVIEW_FALLBACKS
+        .iter()
+        .find_map(|(release_date, fallback)| (date >= *release_date).then_some(*fallback))
+        .unwrap_or(LEGACY_FALLBACK_CODEX_MODEL)
+        .to_string()
 }
 
 fn codex_timestamp_second(timestamp: &str) -> Option<[u8; 19]> {
@@ -1403,9 +1608,10 @@ fn parse_codex_file_records(
         if let Some(model) = extract_codex_model(payload) {
             current_model = Some(model);
         }
-        let model = current_model
+        let raw_model = current_model
             .clone()
             .unwrap_or_else(|| LEGACY_FALLBACK_CODEX_MODEL.to_string());
+        let model = resolve_codex_auto_review_model(&raw_model, timestamp);
         let tokens = codex_usage_to_tokens(&raw_usage);
         // Codex cost is recalculated after aggregation so model-level pricing is applied once.
         let cost = 0.0;
@@ -1849,20 +2055,32 @@ fn load_codex_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
         return Ok(Vec::new());
     }
 
-    let sessions_dir = if let Some(path) = &options.codex_path {
+    let codex_home = if let Some(path) = &options.codex_path {
         if path.is_dir() {
-            path.clone()
+            if path
+                .file_name()
+                .is_some_and(|name| name == CODEX_SESSIONS_DIR_NAME)
+            {
+                path.parent().unwrap_or(path).to_path_buf()
+            } else {
+                path.clone()
+            }
         } else {
             return Ok(Vec::new());
         }
     } else {
-        match codex_sessions_dir() {
+        match codex_home_dir() {
             Some(path) => path,
             None => return Ok(Vec::new()),
         }
     };
 
-    let files = glob_codex_usage_files(&sessions_dir);
+    let source_dirs = codex_usage_dirs(&codex_home);
+    let files = if source_dirs.is_empty() && options.codex_path.is_some() {
+        glob_codex_usage_files(std::slice::from_ref(&codex_home))
+    } else {
+        glob_codex_usage_files(&source_dirs)
+    };
     if files.is_empty() {
         return Ok(Vec::new());
     }
@@ -1875,7 +2093,7 @@ fn load_codex_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
     let mut aggregates: HashMap<GroupKey, Aggregate> = HashMap::new();
     let needs_project_grouping = options.group_by_project;
     let pricing_ref = pricing.as_ref();
-    let codex_fast_speed = resolve_codex_fast_speed(&sessions_dir);
+    let codex_fast_speed = resolve_codex_fast_speed(&codex_home);
     let mut processed_hashes = HashSet::new();
 
     let mut parsed_files = files
@@ -2824,6 +3042,7 @@ mod tests {
                     output_tokens: Some(500),
                     cache_creation_input_tokens: Some(200),
                     cache_read_input_tokens: Some(100),
+                    cache_creation: None,
                 }),
                 model: Some("claude-sonnet-4-20250514".to_string()),
                 id: None,
@@ -2850,6 +3069,7 @@ mod tests {
                     output_tokens: Some(500),
                     cache_creation_input_tokens: None,
                     cache_read_input_tokens: None,
+                    cache_creation: None,
                 }),
                 model: Some("claude-4-sonnet-20250514".to_string()),
                 id: None,
@@ -2877,6 +3097,7 @@ mod tests {
                     output_tokens: Some(500),
                     cache_creation_input_tokens: None,
                     cache_read_input_tokens: None,
+                    cache_creation: None,
                 }),
                 model: Some("claude-4-sonnet-20250514".to_string()),
                 id: None,
@@ -2891,6 +3112,118 @@ mod tests {
         let fetcher = PricingFetcher::new();
         let result = calculate_cost_for_entry(&data, CostMode::Auto, Some(&fetcher));
         assert_eq!(result, 0.05);
+    }
+
+    #[test]
+    fn extract_usage_tokens_prefers_detailed_cache_creation() {
+        let message = UsageMessage {
+            usage: Some(UsageMessageUsage {
+                input_tokens: Some(1),
+                output_tokens: Some(2),
+                cache_creation_input_tokens: Some(999),
+                cache_read_input_tokens: Some(3),
+                cache_creation: Some(CacheCreationUsage {
+                    ephemeral_5m_input_tokens: 10,
+                    ephemeral_1h_input_tokens: 20,
+                }),
+            }),
+            model: None,
+            id: None,
+        };
+
+        let tokens = extract_usage_tokens(&message).unwrap();
+        assert_eq!(tokens.cache_creation_input_tokens, 30);
+    }
+
+    #[test]
+    fn load_daily_usage_includes_advisor_usage_when_parent_usage_is_zero() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "projects/test/session.jsonl",
+            &json!({
+                "timestamp": "2026-07-23T10:00:00Z",
+                "message": {
+                    "id": "msg-1",
+                    "model": "claude-sonnet-4-20250514",
+                    "usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "iterations": [{
+                            "type": "advisor_message",
+                            "model": "claude-opus-4-20250514",
+                            "input_tokens": 100,
+                            "output_tokens": 50
+                        }]
+                    }
+                },
+                "requestId": "req-1"
+            })
+            .to_string(),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            claude_path: Some(fixture.path().to_path_buf()),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Calculate,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].input_tokens, 100);
+        assert_eq!(result[0].output_tokens, 50);
+        assert_eq!(result[0].total_tokens, 150);
+        assert_eq!(result[0].models_used.len(), 2);
+        assert!(
+            result[0]
+                .models_used
+                .iter()
+                .any(|model| model == "claude-sonnet-4-20250514")
+        );
+        assert!(
+            result[0]
+                .models_used
+                .iter()
+                .any(|model| model == "claude-opus-4-20250514")
+        );
+        assert!(result[0].total_cost > 0.0);
+    }
+
+    #[test]
+    fn malformed_advisor_iterations_do_not_drop_parent_usage() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "projects/test/session.jsonl",
+            &json!({
+                "timestamp": "2026-07-23T10:00:00Z",
+                "message": {
+                    "id": "msg-1",
+                    "model": "claude-sonnet-4-20250514",
+                    "usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "iterations": "advisor_message"
+                    }
+                },
+                "requestId": "req-1"
+            })
+            .to_string(),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            claude_path: Some(fixture.path().to_path_buf()),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Calculate,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].input_tokens, 10);
+        assert_eq!(result[0].output_tokens, 5);
+        assert_eq!(result[0].total_tokens, 15);
     }
 
     #[test]
@@ -3487,7 +3820,7 @@ mod tests {
                     "type": "turn_context",
                     "payload": {
                         "model": "gpt-5.4",
-                        "note": "thread_spawn"
+                        "forked_from_id": "parent-session"
                     }
                 })
                 .to_string(),
@@ -3561,6 +3894,150 @@ mod tests {
         assert_eq!(result[0].cache_read_tokens, 200);
         assert_eq!(result[0].output_tokens, 250);
         assert_eq!(result[0].total_tokens, 850);
+    }
+
+    #[test]
+    fn resolve_codex_auto_review_model_uses_event_date_boundaries() {
+        assert_eq!(
+            resolve_codex_auto_review_model(CODEX_AUTO_REVIEW_MODEL, "2026-02-05T00:00:00Z"),
+            "gpt-5.3-codex"
+        );
+        assert_eq!(
+            resolve_codex_auto_review_model(CODEX_AUTO_REVIEW_MODEL, "2026-03-05T00:00:00Z"),
+            "gpt-5.4"
+        );
+        assert_eq!(
+            resolve_codex_auto_review_model(CODEX_AUTO_REVIEW_MODEL, "2026-04-23T00:00:00Z"),
+            "gpt-5.5"
+        );
+        assert_eq!(
+            resolve_codex_auto_review_model(CODEX_AUTO_REVIEW_MODEL, "2025-08-06T23:59:59Z"),
+            "gpt-5"
+        );
+        assert_eq!(
+            resolve_codex_auto_review_model(CODEX_AUTO_REVIEW_MODEL, "invalid"),
+            "gpt-5"
+        );
+    }
+
+    #[test]
+    fn load_daily_usage_resolves_codex_auto_review_per_event() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "sessions/session-1.jsonl",
+            &[
+                json!({
+                    "timestamp": "2025-12-11T10:00:00Z",
+                    "type": "turn_context",
+                    "payload": { "model": CODEX_AUTO_REVIEW_MODEL }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2025-12-11T10:00:01Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 100,
+                                "cached_input_tokens": 0,
+                                "output_tokens": 10,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 110
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-04-23T10:00:01Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 200,
+                                "cached_input_tokens": 0,
+                                "output_tokens": 20,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 220
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            codex: true,
+            claudecode: false,
+            codex_path: Some(fixture.path().join("sessions")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Calculate,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].models_used, vec!["gpt-5.5"]);
+        assert_eq!(result[1].models_used, vec!["gpt-5.2-codex"]);
+    }
+
+    #[test]
+    fn load_daily_usage_reads_archived_codex_sessions_with_active_precedence() {
+        let fixture = create_fixture();
+        let event = |timestamp: &str, input_tokens: u64| {
+            json!({
+                "timestamp": timestamp,
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "model": "gpt-5-codex",
+                        "last_token_usage": {
+                            "input_tokens": input_tokens,
+                            "cached_input_tokens": 0,
+                            "output_tokens": 0,
+                            "reasoning_output_tokens": 0,
+                            "total_tokens": input_tokens
+                        }
+                    }
+                }
+            })
+            .to_string()
+        };
+        write_file(
+            fixture.path(),
+            "sessions/duplicate.jsonl",
+            &event("2026-07-23T10:00:00Z", 111),
+        );
+        write_file(
+            fixture.path(),
+            "archived_sessions/duplicate.jsonl",
+            &event("2026-07-23T10:00:00Z", 999),
+        );
+        write_file(
+            fixture.path(),
+            "archived_sessions/archive-only.jsonl",
+            &event("2026-07-23T10:00:01Z", 222),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            codex: true,
+            claudecode: false,
+            codex_path: Some(fixture.path().join("sessions")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Calculate,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].input_tokens, 333);
+        assert_eq!(result[0].total_tokens, 333);
     }
 
     #[test]

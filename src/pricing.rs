@@ -47,6 +47,12 @@ impl FromStr for CostMode {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct CacheCreationTokens {
+    pub ephemeral_5m_input_tokens: u64,
+    pub ephemeral_1h_input_tokens: u64,
+}
+
+#[derive(Debug, Clone)]
 pub struct UsageTokens {
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -214,6 +220,15 @@ impl PricingFetcher {
         tokens: &UsageTokens,
         pricing: &LiteLLMModelPricing,
     ) -> f64 {
+        self.calculate_cost_from_pricing_with_cache_creation(tokens, None, pricing)
+    }
+
+    fn calculate_cost_from_pricing_with_cache_creation(
+        &self,
+        tokens: &UsageTokens,
+        cache_creation: Option<&CacheCreationTokens>,
+        pricing: &LiteLLMModelPricing,
+    ) -> f64 {
         let calculate_tiered_cost =
             |total: u64, base: Option<f64>, tiered: Option<f64>, threshold: u64| -> f64 {
                 if total == 0 {
@@ -243,10 +258,27 @@ impl PricingFetcher {
             pricing.output_cost_per_token_above_200k_tokens,
             DEFAULT_TIERED_THRESHOLD,
         );
-        let cache_creation_cost = calculate_tiered_cost(
-            tokens.cache_creation_input_tokens,
+        let (cache_creation_5m_tokens, cache_creation_1h_tokens) =
+            if let Some(cache_creation) = cache_creation {
+                (
+                    cache_creation.ephemeral_5m_input_tokens,
+                    cache_creation.ephemeral_1h_input_tokens,
+                )
+            } else {
+                (tokens.cache_creation_input_tokens, 0)
+            };
+        let cache_creation_5m_cost = calculate_tiered_cost(
+            cache_creation_5m_tokens,
             pricing.cache_creation_input_token_cost,
             pricing.cache_creation_input_token_cost_above_200k_tokens,
+            DEFAULT_TIERED_THRESHOLD,
+        );
+        let cache_creation_1h_cost = calculate_tiered_cost(
+            cache_creation_1h_tokens,
+            pricing.input_cost_per_token.map(|cost| cost * 2.0),
+            pricing
+                .input_cost_per_token_above_200k_tokens
+                .map(|cost| cost * 2.0),
             DEFAULT_TIERED_THRESHOLD,
         );
         let cache_read_cost = calculate_tiered_cost(
@@ -256,12 +288,21 @@ impl PricingFetcher {
             DEFAULT_TIERED_THRESHOLD,
         );
 
-        input_cost + output_cost + cache_creation_cost + cache_read_cost
+        input_cost + output_cost + cache_creation_5m_cost + cache_creation_1h_cost + cache_read_cost
     }
 
     pub fn calculate_cost_from_tokens(
         &self,
         tokens: &UsageTokens,
+        model_name: Option<&str>,
+    ) -> f64 {
+        self.calculate_cost_from_tokens_with_cache_creation(tokens, None, model_name)
+    }
+
+    pub(crate) fn calculate_cost_from_tokens_with_cache_creation(
+        &self,
+        tokens: &UsageTokens,
+        cache_creation: Option<&CacheCreationTokens>,
         model_name: Option<&str>,
     ) -> f64 {
         let model_name = match model_name {
@@ -274,7 +315,7 @@ impl PricingFetcher {
             None => return 0.0,
         };
 
-        self.calculate_cost_from_pricing(tokens, &pricing)
+        self.calculate_cost_from_pricing_with_cache_creation(tokens, cache_creation, &pricing)
     }
 
     pub fn calculate_codex_cost_from_tokens(
@@ -355,6 +396,66 @@ mod tests {
         };
         let cost = fetcher.calculate_cost_from_tokens(&tokens, Some("claude-sonnet-4-20250514"));
         assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn calculate_cost_uses_separate_five_minute_and_one_hour_cache_rates() {
+        let fetcher = PricingFetcher::new();
+        let tokens = UsageTokens {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: 999,
+            cache_read_input_tokens: 0,
+        };
+        let cache_creation = CacheCreationTokens {
+            ephemeral_5m_input_tokens: 10,
+            ephemeral_1h_input_tokens: 20,
+        };
+        let pricing = LiteLLMModelPricing {
+            input_cost_per_token: Some(1.0),
+            output_cost_per_token: None,
+            cache_creation_input_token_cost: Some(1.5),
+            cache_read_input_token_cost: None,
+            input_cost_per_token_above_200k_tokens: None,
+            output_cost_per_token_above_200k_tokens: None,
+            cache_creation_input_token_cost_above_200k_tokens: None,
+            cache_read_input_token_cost_above_200k_tokens: None,
+            max_input_tokens: None,
+            provider_specific_entry: None,
+        };
+
+        let cost = fetcher.calculate_cost_from_pricing_with_cache_creation(
+            &tokens,
+            Some(&cache_creation),
+            &pricing,
+        );
+
+        assert_eq!(cost, 55.0);
+    }
+
+    #[test]
+    fn calculate_cost_keeps_flat_cache_creation_fallback() {
+        let fetcher = PricingFetcher::new();
+        let tokens = UsageTokens {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: 10,
+            cache_read_input_tokens: 0,
+        };
+        let pricing = LiteLLMModelPricing {
+            input_cost_per_token: Some(1.0),
+            output_cost_per_token: None,
+            cache_creation_input_token_cost: Some(1.5),
+            cache_read_input_token_cost: None,
+            input_cost_per_token_above_200k_tokens: None,
+            output_cost_per_token_above_200k_tokens: None,
+            cache_creation_input_token_cost_above_200k_tokens: None,
+            cache_read_input_token_cost_above_200k_tokens: None,
+            max_input_tokens: None,
+            provider_specific_entry: None,
+        };
+
+        assert_eq!(fetcher.calculate_cost_from_pricing(&tokens, &pricing), 15.0);
     }
 
     #[test]
