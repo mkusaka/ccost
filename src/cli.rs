@@ -19,7 +19,7 @@ use terminal_size::terminal_size;
 #[command(
     name = "ccost",
     version,
-    about = "Claude Code / Codex / OpenCode usage report (daily/monthly)"
+    about = "Claude Code / Codex / OpenCode / Devin usage report (daily/monthly)"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -37,6 +37,7 @@ enum Agent {
     Codex,
     Claudecode,
     Opencode,
+    Devin,
     All,
 }
 
@@ -45,6 +46,7 @@ struct AgentFlags {
     codex: bool,
     claudecode: bool,
     opencode: bool,
+    devin: bool,
 }
 
 impl AgentFlags {
@@ -53,6 +55,7 @@ impl AgentFlags {
             codex: true,
             claudecode: true,
             opencode: true,
+            devin: true,
         }
     }
 }
@@ -89,7 +92,7 @@ pub struct CommonArgs {
         value_enum,
         value_delimiter = ',',
         default_value = "all",
-        help = "Usage data source: all, codex, claudecode, or opencode"
+        help = "Usage data source: all, codex, claudecode, opencode, or devin"
     )]
     agent: Vec<Agent>,
 }
@@ -104,6 +107,7 @@ impl CommonArgs {
             codex: self.agent.contains(&Agent::Codex),
             claudecode: self.agent.contains(&Agent::Claudecode),
             opencode: self.agent.contains(&Agent::Opencode),
+            devin: self.agent.contains(&Agent::Devin),
         }
     }
 }
@@ -227,6 +231,7 @@ fn common_options(args: &CommonArgs) -> Result<LoadOptions> {
         codex: agents.codex,
         claudecode: agents.claudecode,
         opencode: agents.opencode,
+        devin: agents.devin,
         since: args.since.clone(),
         until: args.until.clone(),
         timezone: args.timezone.clone(),
@@ -438,6 +443,9 @@ fn report_title(period: &str, args: &CommonArgs) -> String {
     if agents.opencode {
         sources.push("OpenCode");
     }
+    if agents.devin {
+        sources.push("Devin");
+    }
     let source = if sources.is_empty() {
         "No Source".to_string()
     } else {
@@ -624,7 +632,7 @@ mod tests {
         assert_eq!(common.agent_flags(), AgentFlags::all());
         assert_eq!(
             report_title("Daily", &common),
-            "Claude Code + Codex + OpenCode Token Usage Report - Daily"
+            "Claude Code + Codex + OpenCode + Devin Token Usage Report - Daily"
         );
     }
 
@@ -638,6 +646,7 @@ mod tests {
                 codex: true,
                 claudecode: false,
                 opencode: false,
+                devin: false,
             }
         );
         assert_eq!(
@@ -656,6 +665,7 @@ mod tests {
                 codex: true,
                 claudecode: false,
                 opencode: true,
+                devin: false,
             }
         );
         assert_eq!(

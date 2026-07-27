@@ -98,8 +98,8 @@ impl PricingFetcher {
                 "openrouter/openai/".to_string(),
             ],
             model_aliases: HashMap::from([
-                ("gpt-5-codex".to_string(), "gpt-5".to_string()),
-                ("gpt-5.3-codex".to_string(), "gpt-5".to_string()),
+                ("GPT-5.6 Sol".to_string(), "gpt-5.6-sol".to_string()),
+                ("Claude Fable 5".to_string(), "claude-fable-5".to_string()),
                 ("claude-opus-4.5".to_string(), "claude-opus-4-5".to_string()),
                 (
                     "claude-sonnet-4.5".to_string(),
@@ -472,6 +472,21 @@ mod tests {
     }
 
     #[test]
+    fn codex_model_pricing_does_not_fall_back_to_gpt_5() {
+        let fetcher = PricingFetcher::new();
+        let gpt_5 = fetcher
+            .get_model_pricing("gpt-5")
+            .unwrap()
+            .input_cost_per_token;
+        let gpt_5_codex = fetcher
+            .get_model_pricing("gpt-5.3-codex")
+            .unwrap()
+            .input_cost_per_token;
+
+        assert_ne!(gpt_5, gpt_5_codex);
+    }
+
+    #[test]
     fn calculate_codex_cost_applies_gpt_5_5_fast_multiplier() {
         let fetcher = PricingFetcher::new();
         let tokens = UsageTokens {
@@ -512,6 +527,20 @@ mod tests {
         };
         let cost = fetcher.calculate_cost_from_tokens(&tokens, Some("opus-4-6"));
         assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn calculate_cost_from_tokens_supports_devin_model_labels() {
+        let fetcher = PricingFetcher::new();
+        let tokens = UsageTokens {
+            input_tokens: 1_000,
+            output_tokens: 100,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 100,
+        };
+
+        assert!(fetcher.calculate_cost_from_tokens(&tokens, Some("Claude Fable 5")) > 0.0);
+        assert!(fetcher.calculate_cost_from_tokens(&tokens, Some("GPT-5.6 Sol")) > 0.0);
     }
 
     #[test]

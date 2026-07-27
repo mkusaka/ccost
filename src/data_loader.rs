@@ -31,6 +31,9 @@ const DEFAULT_OPENCODE_PATH: &str = ".local/share/opencode";
 const OPENCODE_STORAGE_DIR_NAME: &str = "storage";
 const OPENCODE_MESSAGES_DIR_NAME: &str = "message";
 const OPENCODE_DB_FILENAME: &str = "opencode.db";
+const DEVIN_DATA_DIR_ENV: &str = "DEVIN_DATA_DIR";
+const DEVIN_TRANSCRIPTS_DIR_NAME: &str = "transcripts";
+const DEVIN_DB_FILENAME: &str = "sessions.db";
 const TIMESTAMP_MARKER: &[u8] = b"\"timestamp\":\"";
 const USAGE_FIELD_MARKER: &[u8] = b"\"usage\"";
 const CODEX_TURN_CONTEXT_MARKER: &[u8] = b"\"turn_context\"";
@@ -269,6 +272,40 @@ struct OpenCodeCacheTokens {
     write: Option<u64>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct DevinTranscript {
+    session_id: Option<String>,
+    agent: Option<DevinAgent>,
+    #[serde(default)]
+    steps: Vec<DevinStep>,
+    final_metrics: Option<DevinFinalMetrics>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DevinAgent {
+    model_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DevinStep {
+    timestamp: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DevinFinalMetrics {
+    total_prompt_tokens: Option<u64>,
+    total_completion_tokens: Option<u64>,
+    total_cached_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct DevinSessionInfo {
+    working_directory: Option<String>,
+    model: Option<String>,
+    last_activity_at: Option<i64>,
+    hidden: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ModelBreakdown {
     pub model_name: String,
@@ -374,12 +411,14 @@ pub struct LoadOptions {
     pub claude_path: Option<PathBuf>,
     pub codex_path: Option<PathBuf>,
     pub opencode_path: Option<PathBuf>,
+    pub devin_path: Option<PathBuf>,
     pub mode: CostMode,
     pub order: SortOrder,
     pub offline: bool,
     pub codex: bool,
     pub claudecode: bool,
     pub opencode: bool,
+    pub devin: bool,
     pub group_by_project: bool,
     pub project: Option<String>,
     pub since: Option<String>,
@@ -393,12 +432,14 @@ impl Default for LoadOptions {
             claude_path: None,
             codex_path: None,
             opencode_path: None,
+            devin_path: None,
             mode: CostMode::Auto,
             order: SortOrder::Desc,
             offline: true,
             codex: false,
             claudecode: true,
             opencode: false,
+            devin: false,
             group_by_project: false,
             project: None,
             since: None,
@@ -2239,6 +2280,207 @@ fn load_opencode_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsag
     ))
 }
 
+fn devin_data_paths(options: &LoadOptions) -> Vec<PathBuf> {
+    let candidates = if let Some(path) = &options.devin_path {
+        vec![path.clone()]
+    } else if let Ok(value) = std::env::var(DEVIN_DATA_DIR_ENV) {
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+            .collect()
+    } else {
+        dirs::home_dir()
+            .map(|home| vec![home.join(".local").join("share").join("devin").join("cli")])
+            .unwrap_or_default()
+    };
+
+    let mut seen = HashSet::new();
+    candidates
+        .into_iter()
+        .filter(|path| path.is_dir() && seen.insert(path.clone()))
+        .collect()
+}
+
+fn devin_transcript_files(data_dir: &Path) -> Vec<PathBuf> {
+    let transcripts = data_dir.join(DEVIN_TRANSCRIPTS_DIR_NAME);
+    if !transcripts.is_dir() {
+        return Vec::new();
+    }
+
+    WalkDir::new(transcripts)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+        .map(|entry| entry.path().to_path_buf())
+        .collect()
+}
+
+fn load_devin_session_info(data_dir: &Path) -> HashMap<String, DevinSessionInfo> {
+    let db_path = data_dir.join(DEVIN_DB_FILENAME);
+    let Ok(connection) = Connection::open_with_flags(
+        db_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return HashMap::new();
+    };
+    let Ok(mut statement) = connection
+        .prepare("SELECT id, working_directory, model, last_activity_at, hidden FROM sessions")
+    else {
+        return HashMap::new();
+    };
+    let Ok(rows) = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            DevinSessionInfo {
+                working_directory: row.get(1).ok(),
+                model: row.get(2).ok(),
+                last_activity_at: row.get(3).ok(),
+                hidden: row.get::<_, i64>(4).unwrap_or(0) != 0,
+            },
+        ))
+    }) else {
+        return HashMap::new();
+    };
+
+    rows.filter_map(Result::ok).collect()
+}
+
+fn devin_timestamp(
+    transcript: &DevinTranscript,
+    info: Option<&DevinSessionInfo>,
+) -> Option<String> {
+    transcript
+        .steps
+        .iter()
+        .find_map(|step| step.timestamp.as_deref())
+        .map(str::to_string)
+        .or_else(|| {
+            info.and_then(|info| info.last_activity_at)
+                .map(|value| {
+                    if value.abs() < 10_000_000_000 {
+                        value.saturating_mul(1_000)
+                    } else {
+                        value
+                    }
+                })
+                .and_then(DateTime::<Utc>::from_timestamp_millis)
+                .map(|timestamp| timestamp.to_rfc3339())
+        })
+}
+
+fn devin_project(info: Option<&DevinSessionInfo>) -> Option<String> {
+    info.and_then(|info| info.working_directory.as_deref())
+        .map(Path::new)
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+}
+
+fn load_devin_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>> {
+    let parsed_timezone = match options.timezone.as_deref() {
+        Some(tz_str) => Tz::from_str(tz_str).ok(),
+        None => None,
+    };
+    if options.timezone.is_some() && parsed_timezone.is_none() {
+        return Ok(Vec::new());
+    }
+
+    let pricing = if matches!(options.mode, CostMode::Display) {
+        None
+    } else {
+        Some(PricingFetcher::new())
+    };
+    let pricing_ref = pricing.as_ref();
+    let needs_project_grouping = options.group_by_project || options.project.is_some();
+    let mut aggregates: HashMap<GroupKey, Aggregate> = HashMap::new();
+
+    for data_dir in devin_data_paths(options) {
+        let session_info = load_devin_session_info(&data_dir);
+        for file in devin_transcript_files(&data_dir) {
+            let Ok(content) = std::fs::read_to_string(&file) else {
+                continue;
+            };
+            let Ok(transcript) = serde_json::from_str::<DevinTranscript>(&content) else {
+                continue;
+            };
+            let session_id = transcript.session_id.clone().or_else(|| {
+                file.file_stem()
+                    .map(|name| name.to_string_lossy().into_owned())
+            });
+            let info = session_id.as_deref().and_then(|id| session_info.get(id));
+            if info.is_some_and(|info| info.hidden) {
+                continue;
+            }
+            let Some(metrics) = transcript.final_metrics.as_ref() else {
+                continue;
+            };
+            let Some(timestamp) = devin_timestamp(&transcript, info) else {
+                continue;
+            };
+            let Some(date) = format_date_with_tz(&timestamp, parsed_timezone) else {
+                continue;
+            };
+            let cached = metrics.total_cached_tokens.unwrap_or(0);
+            let tokens = UsageTokens {
+                input_tokens: metrics
+                    .total_prompt_tokens
+                    .unwrap_or(0)
+                    .saturating_sub(cached),
+                output_tokens: metrics.total_completion_tokens.unwrap_or(0),
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: cached,
+            };
+            let total_tokens = total_tokens_from_usage(&tokens);
+            if total_tokens == 0 {
+                continue;
+            }
+            let model = transcript
+                .agent
+                .and_then(|agent| agent.model_name)
+                .or_else(|| info.and_then(|info| info.model.clone()));
+            let cost = calculate_cost_for_usage(
+                model.as_deref(),
+                &tokens,
+                None,
+                None,
+                options.mode,
+                pricing_ref,
+            );
+            let project = devin_project(info).map(Arc::<str>::from);
+            if options
+                .project
+                .as_deref()
+                .is_some_and(|wanted| project.as_deref() != Some(wanted))
+            {
+                continue;
+            }
+            aggregate_usage_record(
+                &mut aggregates,
+                (date, project),
+                needs_project_grouping,
+                model.as_deref(),
+                &tokens,
+                total_tokens,
+                cost,
+            );
+        }
+    }
+
+    let filtered = filter_by_date_range(
+        aggregates_to_daily_usage(aggregates),
+        |item| item.date.as_str(),
+        options.since.as_deref(),
+        options.until.as_deref(),
+    );
+    Ok(sort_by_date(
+        filtered,
+        |item| item.date.as_str(),
+        options.order,
+    ))
+}
+
 fn merge_daily_usage(entries: Vec<DailyUsage>, order: SortOrder) -> Vec<DailyUsage> {
     let mut aggregates: HashMap<(String, Option<String>), Aggregate> = HashMap::new();
 
@@ -2319,6 +2561,9 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
     }
     if options.opencode {
         all_entries.extend(load_opencode_daily_usage_data(&options)?);
+    }
+    if options.devin {
+        all_entries.extend(load_devin_daily_usage_data(&options)?);
     }
 
     if all_entries.is_empty() {
@@ -4468,6 +4713,115 @@ mod tests {
         assert_eq!(result[0].cache_read_tokens, 40);
         assert_eq!(result[0].total_cost, 0.0123);
         assert!(result[0].models_used.iter().any(|m| m == "gpt-5"));
+    }
+
+    #[test]
+    fn load_daily_usage_supports_devin_final_metrics() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "devin/transcripts/session-1.json",
+            &json!({
+                "schema_version": "ATIF-v1.7",
+                "session_id": "session-1",
+                "agent": { "model_name": "gpt-5" },
+                "steps": [
+                    { "timestamp": "2026-06-25T04:14:17.086Z", "source": "agent" }
+                ],
+                "final_metrics": {
+                    "total_prompt_tokens": 1000,
+                    "total_completion_tokens": 200,
+                    "total_cached_tokens": 100,
+                    "total_steps": 1
+                }
+            })
+            .to_string(),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            claude_path: None,
+            claudecode: false,
+            devin: true,
+            devin_path: Some(fixture.path().join("devin")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Calculate,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].date, "2026-06-25");
+        assert_eq!(result[0].input_tokens, 900);
+        assert_eq!(result[0].output_tokens, 200);
+        assert_eq!(result[0].cache_read_tokens, 100);
+        assert_eq!(result[0].total_tokens, 1200);
+        assert_eq!(result[0].models_used, vec!["gpt-5"]);
+        assert!(result[0].total_cost > 0.0);
+    }
+
+    #[test]
+    fn load_daily_usage_uses_devin_session_metadata_and_skips_hidden_sessions() {
+        let fixture = create_fixture();
+        let devin_path = fixture.path().join("devin");
+        write_file(
+            fixture.path(),
+            "devin/transcripts/session-1.json",
+            &json!({
+                "session_id": "session-1",
+                "agent": { "model_name": "unknown-label" },
+                "steps": [],
+                "final_metrics": {
+                    "total_prompt_tokens": 100,
+                    "total_completion_tokens": 50,
+                    "total_cached_tokens": 10
+                }
+            })
+            .to_string(),
+        );
+        write_file(
+            fixture.path(),
+            "devin/transcripts/hidden.json",
+            &json!({
+                "session_id": "hidden",
+                "steps": [{ "timestamp": "2026-06-25T00:00:00Z" }],
+                "final_metrics": {
+                    "total_prompt_tokens": 500,
+                    "total_completion_tokens": 500,
+                    "total_cached_tokens": 0
+                }
+            })
+            .to_string(),
+        );
+        let connection = Connection::open(devin_path.join(DEVIN_DB_FILENAME)).unwrap();
+        connection
+            .execute(
+                "CREATE TABLE sessions (id TEXT, working_directory TEXT, model TEXT, last_activity_at INTEGER, hidden INTEGER)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO sessions VALUES ('session-1', '/work/example-project', 'gpt-5', 1782345600000, 0), ('hidden', '/work/hidden', 'gpt-5', 1782345600000, 1)",
+                [],
+            )
+            .unwrap();
+
+        let result = load_daily_usage_data(LoadOptions {
+            claudecode: false,
+            devin: true,
+            devin_path: Some(devin_path),
+            group_by_project: true,
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Display,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].project.as_deref(), Some("example-project"));
+        assert_eq!(result[0].input_tokens, 90);
+        assert_eq!(result[0].output_tokens, 50);
+        assert_eq!(result[0].cache_read_tokens, 10);
     }
 
     #[test]
