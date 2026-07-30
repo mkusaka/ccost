@@ -27,18 +27,24 @@ grep '^version' Cargo.toml
 cargo build
 ```
 
-### 4. コミット・PR・マージ
+### 4. コミット・push
 
-`commit-commands:commit-push-pr` スキルを使ってコミット・PR 作成を行い、マージまで実施する。
+変更を main に直接コミットして push する。PR は作成しない。
 コミットメッセージ例: `chore: bump version to 0.1.12`
+
+```bash
+git add Cargo.toml Cargo.lock
+git commit -m "chore: bump version to <NEW_VERSION>"
+git push origin main
+```
 
 ### 5. tag 作成・push
 
-main に戻って最新を pull した後、tag を作成して push する。
+main の最新を pull した後、tag を作成して push する。
 **tag 名は Cargo.toml のバージョンと一致させること**（不一致の場合リリース CI が失敗する）。
 
 ```bash
-git checkout main && git pull
+git pull --ff-only
 git tag v<NEW_VERSION>
 git push origin v<NEW_VERSION>
 ```
