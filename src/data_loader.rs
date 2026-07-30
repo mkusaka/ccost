@@ -232,7 +232,7 @@ struct CodexTokenUsage {
     total_tokens: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct CodexRawUsage {
     input_tokens: u64,
     cached_input_tokens: u64,
@@ -1421,6 +1421,27 @@ fn subtract_codex_usage(
     }
 }
 
+fn select_codex_raw_usage(
+    info: &CodexTokenInfo,
+    previous_totals: &mut Option<CodexRawUsage>,
+) -> Option<CodexRawUsage> {
+    let last_usage = info.last_token_usage.as_ref().map(normalize_codex_usage);
+    let total_usage = info.total_token_usage.as_ref().map(normalize_codex_usage);
+    let cumulative_advanced = total_usage
+        .as_ref()
+        .is_none_or(|total| previous_totals.as_ref() != Some(total));
+    let raw_usage = last_usage.filter(|_| cumulative_advanced).or_else(|| {
+        total_usage
+            .as_ref()
+            .map(|total| subtract_codex_usage(total, previous_totals.as_ref()))
+    });
+
+    if let Some(total) = total_usage {
+        *previous_totals = Some(total);
+    }
+    raw_usage
+}
+
 fn codex_usage_to_tokens(delta: &CodexRawUsage) -> UsageTokens {
     let cached = delta.cached_input_tokens.min(delta.input_tokens);
     let input = delta.input_tokens.saturating_sub(cached);
@@ -1499,18 +1520,186 @@ fn resolve_codex_auto_review_model(model: &str, timestamp: &str) -> String {
         .to_string()
 }
 
-fn codex_timestamp_second(timestamp: &str) -> Option<[u8; 19]> {
-    timestamp
-        .as_bytes()
-        .get(0..19)
-        .and_then(|value| value.try_into().ok())
+const CODEX_REPLAY_BURST_PAUSE_MS: i64 = 1_000;
+
+#[derive(Default)]
+struct CodexSessionMetadata {
+    session_id: Option<String>,
+    parent_id: Option<String>,
+    forked_at: Option<DateTime<Utc>>,
 }
 
-fn detect_codex_subagent_replay_second(file: &Path) -> Option<[u8; 19]> {
+struct CodexReplayPrefix {
+    usage: Vec<CodexRawUsage>,
+    parent_resolved: bool,
+}
+
+fn read_codex_session_metadata(file: &Path) -> CodexSessionMetadata {
+    let Ok(file) = File::open(file) else {
+        return CodexSessionMetadata::default();
+    };
+    let mut reader = BufReader::new(file);
+    let mut line = Vec::new();
+    if reader.read_until(b'\n', &mut line).ok().unwrap_or(0) == 0 {
+        return CodexSessionMetadata::default();
+    }
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(trim_ascii_whitespace(&line))
+    else {
+        return CodexSessionMetadata::default();
+    };
+    if value.get("type").and_then(serde_json::Value::as_str) != Some("session_meta") {
+        return CodexSessionMetadata::default();
+    }
+    let payload = value.get("payload");
+    let parent_id = payload
+        .and_then(|payload| payload.get("forked_from_id"))
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            payload
+                .and_then(|payload| {
+                    payload.pointer("/source/subagent/thread_spawn/parent_thread_id")
+                })
+                .and_then(serde_json::Value::as_str)
+        })
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    CodexSessionMetadata {
+        session_id: payload
+            .and_then(|payload| payload.get("id"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        parent_id,
+        forked_at: value
+            .get("timestamp")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())
+            .map(|timestamp| timestamp.with_timezone(&Utc)),
+    }
+}
+
+fn read_codex_usage_stream(file: &Path) -> Vec<(DateTime<Utc>, CodexRawUsage)> {
+    let Ok(file) = File::open(file) else {
+        return Vec::new();
+    };
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
+    let mut line = Vec::new();
+    let mut previous_totals = None;
+    let mut usage = Vec::new();
+
+    loop {
+        line.clear();
+        let Ok(bytes_read) = reader.read_until(b'\n', &mut line) else {
+            break;
+        };
+        if bytes_read == 0 {
+            break;
+        }
+        let trimmed = trim_ascii_whitespace(&line);
+        if !line_contains_any_marker(trimmed, &[CODEX_TOKEN_COUNT_MARKER]) {
+            continue;
+        }
+        let Ok(parsed) = sonic_rs::from_slice::<CodexEntry>(trimmed) else {
+            continue;
+        };
+        if parsed.entry_type.as_deref() != Some("event_msg") {
+            continue;
+        }
+        let Some(payload) = parsed.payload.as_ref() else {
+            continue;
+        };
+        if payload.payload_type.as_deref() != Some("token_count") {
+            continue;
+        }
+        let Some(timestamp) = parsed
+            .timestamp
+            .as_deref()
+            .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())
+            .map(|timestamp| timestamp.with_timezone(&Utc))
+        else {
+            continue;
+        };
+        let Some(info) = payload.info.as_ref() else {
+            continue;
+        };
+        let Some(raw_usage) = select_codex_raw_usage(info, &mut previous_totals) else {
+            continue;
+        };
+        if raw_usage.input_tokens == 0
+            && raw_usage.cached_input_tokens == 0
+            && raw_usage.output_tokens == 0
+            && raw_usage.reasoning_output_tokens == 0
+        {
+            continue;
+        }
+        usage.push((timestamp, raw_usage));
+    }
+    usage
+}
+
+fn build_codex_replay_prefixes(files: &[PathBuf]) -> HashMap<PathBuf, CodexReplayPrefix> {
+    let metadata = files
+        .par_iter()
+        .map(|file| (file.clone(), read_codex_session_metadata(file)))
+        .collect::<Vec<_>>();
+    let files_by_session_id = metadata
+        .iter()
+        .filter_map(|(file, metadata)| {
+            metadata
+                .session_id
+                .as_ref()
+                .map(|session_id| (session_id.clone(), file.clone()))
+        })
+        .collect::<HashMap<_, _>>();
+    let parent_files = metadata
+        .iter()
+        .filter_map(|(_, metadata)| metadata.parent_id.as_ref())
+        .filter_map(|parent_id| files_by_session_id.get(parent_id))
+        .cloned()
+        .collect::<HashSet<_>>();
+    let usage_by_parent = parent_files
+        .par_iter()
+        .map(|file| (file.clone(), read_codex_usage_stream(file)))
+        .collect::<HashMap<_, _>>();
+
+    metadata
+        .into_iter()
+        .filter_map(|(child, metadata)| {
+            let parent_id = metadata.parent_id?;
+            let parent_usage = files_by_session_id
+                .get(&parent_id)
+                .and_then(|parent| usage_by_parent.get(parent));
+            let usage = parent_usage
+                .map(|usage| {
+                    usage
+                        .iter()
+                        .take_while(|(timestamp, _)| {
+                            metadata
+                                .forked_at
+                                .as_ref()
+                                .is_none_or(|forked_at| timestamp <= forked_at)
+                        })
+                        .map(|(_, usage)| usage.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            Some((
+                child,
+                CodexReplayPrefix {
+                    usage,
+                    parent_resolved: parent_usage.is_some(),
+                },
+            ))
+        })
+        .collect()
+}
+
+fn detect_codex_replay_burst_start(file: &Path) -> Option<DateTime<Utc>> {
     let file = File::open(file).ok()?;
     let mut reader = BufReader::with_capacity(64 * 1024, file);
     let mut line = Vec::new();
-    let mut first_second: Option<[u8; 19]> = None;
+    let mut first_timestamp = None;
 
     loop {
         line.clear();
@@ -1539,14 +1728,19 @@ fn detect_codex_subagent_replay_second(file: &Path) -> Option<[u8; 19]> {
         if info.last_token_usage.is_none() && info.total_token_usage.is_none() {
             continue;
         }
-        let second = parsed
+        let timestamp = parsed
             .timestamp
             .as_deref()
-            .and_then(codex_timestamp_second)?;
-        match first_second {
-            None => first_second = Some(second),
-            Some(first) if first == second => return Some(second),
-            Some(_) => return None,
+            .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())?
+            .with_timezone(&Utc);
+        match first_timestamp {
+            None => first_timestamp = Some(timestamp),
+            Some(first) => {
+                let pause = timestamp.signed_duration_since(first).num_milliseconds();
+                return (0..=CODEX_REPLAY_BURST_PAUSE_MS)
+                    .contains(&pause)
+                    .then_some(first);
+            }
         }
     }
 
@@ -1556,15 +1750,26 @@ fn detect_codex_subagent_replay_second(file: &Path) -> Option<[u8; 19]> {
 fn parse_codex_file_records(
     file: &Path,
     timezone: Option<chrono_tz::Tz>,
+    replay_prefix: Option<&CodexReplayPrefix>,
 ) -> Result<ParsedFileRecords> {
     let mut records = Vec::new();
     let mut earliest_timestamp: Option<DateTime<Utc>> = None;
     let mut previous_totals: Option<CodexRawUsage> = None;
     let mut current_model: Option<String> = None;
-    let replay_second = is_codex_subagent_session(file)
-        .then(|| detect_codex_subagent_replay_second(file))
+    let legacy_child = replay_prefix.is_none() && is_codex_subagent_session(file);
+    let is_child = replay_prefix.is_some() || legacy_child;
+    let replay_usage = replay_prefix.map(|prefix| prefix.usage.as_slice());
+    let mut matching_parent =
+        replay_prefix.is_some_and(|prefix| prefix.parent_resolved && !prefix.usage.is_empty());
+    let parent_resolved_without_usage =
+        replay_prefix.is_some_and(|prefix| prefix.parent_resolved && prefix.usage.is_empty());
+    let replay_burst_start = is_child
+        .then(|| detect_codex_replay_burst_start(file))
         .flatten();
-    let mut skip_replay = replay_second.is_some();
+    let mut replay_burst_previous = (!matching_parent && !parent_resolved_without_usage)
+        .then_some(replay_burst_start)
+        .flatten();
+    let mut replay_index = 0;
 
     process_jsonl_file_by_line_bytes(file, |line, _| {
         update_earliest_timestamp_from_line(line, &mut earliest_timestamp);
@@ -1606,45 +1811,61 @@ fn parse_codex_file_records(
             Some(info) => info,
             None => return Ok(()),
         };
-        let last_usage = info.last_token_usage.as_ref().map(normalize_codex_usage);
-        let total_usage = info.total_token_usage.as_ref().map(normalize_codex_usage);
-
-        if let Some(replay_second) = replay_second
-            && skip_replay
-        {
-            let matches_replay =
-                codex_timestamp_second(timestamp).is_some_and(|second| second == replay_second);
-            if matches_replay {
-                if let Some(total) = total_usage {
-                    previous_totals = Some(total);
-                }
-                return Ok(());
-            }
-            skip_replay = false;
-        }
-
-        let date = match format_date_with_tz(timestamp, timezone) {
-            Some(date) => date,
+        let raw_usage = match select_codex_raw_usage(info, &mut previous_totals) {
+            Some(usage) => usage,
             None => return Ok(()),
         };
-
-        let raw_usage = match (last_usage, total_usage.clone()) {
-            (Some(last), _) => last,
-            (None, Some(total)) => subtract_codex_usage(&total, previous_totals.as_ref()),
-            (None, None) => return Ok(()),
-        };
-
-        if let Some(total) = total_usage {
-            previous_totals = Some(total);
-        }
 
         if raw_usage.input_tokens == 0
             && raw_usage.cached_input_tokens == 0
             && raw_usage.output_tokens == 0
             && raw_usage.reasoning_output_tokens == 0
         {
+            if let Some(previous) = replay_burst_previous {
+                replay_burst_previous = DateTime::parse_from_rfc3339(timestamp)
+                    .ok()
+                    .map(|timestamp| timestamp.with_timezone(&Utc))
+                    .filter(|timestamp| {
+                        (0..=CODEX_REPLAY_BURST_PAUSE_MS)
+                            .contains(&timestamp.signed_duration_since(previous).num_milliseconds())
+                    });
+            }
             return Ok(());
         }
+
+        if matching_parent {
+            if replay_usage.and_then(|usage| usage.get(replay_index)) == Some(&raw_usage) {
+                replay_index += 1;
+                return Ok(());
+            }
+            matching_parent = false;
+            if replay_index == 0 {
+                replay_burst_previous = replay_burst_start;
+            }
+        }
+
+        if let Some(previous) = replay_burst_previous {
+            let Some(parsed_timestamp) = DateTime::parse_from_rfc3339(timestamp)
+                .ok()
+                .map(|timestamp| timestamp.with_timezone(&Utc))
+            else {
+                replay_burst_previous = None;
+                return Ok(());
+            };
+            let pause = parsed_timestamp
+                .signed_duration_since(previous)
+                .num_milliseconds();
+            if (0..=CODEX_REPLAY_BURST_PAUSE_MS).contains(&pause) {
+                replay_burst_previous = Some(parsed_timestamp);
+                return Ok(());
+            }
+            replay_burst_previous = None;
+        }
+
+        let date = match format_date_with_tz(timestamp, timezone) {
+            Some(date) => date,
+            None => return Ok(()),
+        };
 
         if let Some(model) = extract_codex_model(payload) {
             current_model = Some(model);
@@ -2136,10 +2357,11 @@ fn load_codex_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
     let pricing_ref = pricing.as_ref();
     let codex_fast_speed = resolve_codex_fast_speed(&codex_home);
     let mut processed_hashes = HashSet::new();
+    let replay_prefixes = build_codex_replay_prefixes(&files);
 
     let mut parsed_files = files
         .par_iter()
-        .map(|file| parse_codex_file_records(file, parsed_timezone))
+        .map(|file| parse_codex_file_records(file, parsed_timezone, replay_prefixes.get(file)))
         .collect::<Result<Vec<_>>>()?;
     parsed_files.sort_by(compare_parsed_file_records);
 
@@ -2740,6 +2962,45 @@ mod tests {
 
     fn create_fixture() -> TempDir {
         TempDir::new().unwrap()
+    }
+
+    fn codex_usage_event(timestamp: &str, last_input: u64, total_input: u64) -> String {
+        json!({
+            "timestamp": timestamp,
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": {
+                        "input_tokens": last_input,
+                        "cached_input_tokens": 0,
+                        "output_tokens": 0,
+                        "reasoning_output_tokens": 0,
+                        "total_tokens": last_input
+                    },
+                    "total_token_usage": {
+                        "input_tokens": total_input,
+                        "cached_input_tokens": 0,
+                        "output_tokens": 0,
+                        "reasoning_output_tokens": 0,
+                        "total_tokens": total_input
+                    }
+                }
+            }
+        })
+        .to_string()
+    }
+
+    fn load_codex_fixture(fixture: &TempDir) -> Vec<DailyUsage> {
+        load_daily_usage_data(LoadOptions {
+            codex: true,
+            claudecode: false,
+            codex_path: Some(fixture.path().join("sessions")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Display,
+            ..LoadOptions::default()
+        })
+        .unwrap()
     }
 
     fn write_opencode_sqlite_messages(base: &Path, rows: &[(&str, i64, serde_json::Value)]) {
@@ -4104,7 +4365,7 @@ mod tests {
                 })
                 .to_string(),
                 json!({
-                    "timestamp": "2026-05-12T08:00:01.000Z",
+                    "timestamp": "2026-05-12T08:00:02.000Z",
                     "type": "event_msg",
                     "payload": {
                         "type": "token_count",
@@ -4139,6 +4400,228 @@ mod tests {
         assert_eq!(result[0].cache_read_tokens, 200);
         assert_eq!(result[0].output_tokens, 250);
         assert_eq!(result[0].total_tokens, 850);
+    }
+
+    #[test]
+    fn load_daily_usage_skips_parent_usage_prefix_with_original_timestamps() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "sessions/parent.jsonl",
+            &[
+                json!({
+                    "timestamp": "2026-05-12T08:00:00Z",
+                    "type": "session_meta",
+                    "payload": { "id": "parent" }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-05-12T08:00:01Z",
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5.4" }
+                })
+                .to_string(),
+                codex_usage_event("2026-05-12T08:01:00Z", 100, 100),
+                codex_usage_event("2026-05-12T08:02:00Z", 200, 300),
+            ]
+            .join("\n"),
+        );
+        write_file(
+            fixture.path(),
+            "sessions/child.jsonl",
+            &[
+                json!({
+                    "timestamp": "2026-05-12T08:03:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "child",
+                        "source": {
+                            "subagent": {
+                                "thread_spawn": { "parent_thread_id": "parent" }
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+                codex_usage_event("2026-05-12T08:01:00Z", 100, 100),
+                codex_usage_event("2026-05-12T08:02:00Z", 200, 300),
+                json!({
+                    "timestamp": "2026-05-12T08:03:01Z",
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5.4" }
+                })
+                .to_string(),
+                codex_usage_event("2026-05-12T08:04:00Z", 25, 325),
+            ]
+            .join("\n"),
+        );
+
+        let result = load_codex_fixture(&fixture);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].input_tokens, 325);
+        assert_eq!(result[0].total_tokens, 325);
+    }
+
+    #[test]
+    fn load_daily_usage_skips_rewritten_replay_burst_across_second_boundary() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "sessions/child.jsonl",
+            &[
+                json!({
+                    "timestamp": "2026-05-12T08:00:00Z",
+                    "type": "session_meta",
+                    "payload": { "id": "child", "forked_from_id": "missing-parent" }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-05-12T08:00:00Z",
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5.4" }
+                })
+                .to_string(),
+                codex_usage_event("2026-05-12T08:00:00.100Z", 100, 100),
+                codex_usage_event("2026-05-12T08:00:00.900Z", 100, 100),
+                codex_usage_event("2026-05-12T08:00:01.500Z", 200, 300),
+                codex_usage_event("2026-05-12T08:00:03.500Z", 25, 325),
+            ]
+            .join("\n"),
+        );
+
+        let result = load_codex_fixture(&fixture);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].input_tokens, 25);
+        assert_eq!(result[0].total_tokens, 25);
+    }
+
+    #[test]
+    fn load_daily_usage_skips_repeated_last_usage_when_total_is_unchanged() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "sessions/session.jsonl",
+            &[
+                json!({
+                    "timestamp": "2026-05-12T08:00:00Z",
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5.4" }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-05-12T08:00:01Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 100,
+                                "cached_input_tokens": 20,
+                                "output_tokens": 10,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 110
+                            },
+                            "total_token_usage": {
+                                "input_tokens": 100,
+                                "cached_input_tokens": 20,
+                                "output_tokens": 10,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 110
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-05-12T08:00:02Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 100,
+                                "cached_input_tokens": 20,
+                                "output_tokens": 10,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 110
+                            },
+                            "total_token_usage": {
+                                "input_tokens": 100,
+                                "cached_input_tokens": 20,
+                                "output_tokens": 10,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 110
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        );
+
+        let result = load_codex_fixture(&fixture);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].input_tokens, 80);
+        assert_eq!(result[0].cache_read_tokens, 20);
+        assert_eq!(result[0].output_tokens, 10);
+        assert_eq!(result[0].total_tokens, 110);
+    }
+
+    #[test]
+    fn load_daily_usage_keeps_child_usage_after_parent_replay_prefix() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "sessions/parent.jsonl",
+            &[
+                json!({
+                    "timestamp": "2026-05-12T08:00:00Z",
+                    "type": "session_meta",
+                    "payload": { "id": "parent" }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-05-12T08:00:01Z",
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5.4" }
+                })
+                .to_string(),
+                codex_usage_event("2026-05-12T08:01:00Z", 100, 100),
+                codex_usage_event("2026-05-12T08:03:00Z", 50, 150),
+            ]
+            .join("\n"),
+        );
+        write_file(
+            fixture.path(),
+            "sessions/child.jsonl",
+            &[
+                json!({
+                    "timestamp": "2026-05-12T08:02:00Z",
+                    "type": "session_meta",
+                    "payload": { "id": "child", "forked_from_id": "parent" }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-05-12T08:02:00Z",
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5.4" }
+                })
+                .to_string(),
+                codex_usage_event("2026-05-12T08:02:00.100Z", 100, 100),
+                codex_usage_event("2026-05-12T08:04:00Z", 50, 150),
+            ]
+            .join("\n"),
+        );
+
+        let result = load_codex_fixture(&fixture);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].input_tokens, 200);
+        assert_eq!(result[0].total_tokens, 200);
     }
 
     #[test]
