@@ -582,6 +582,7 @@
     "prompt_cache_min_tokens": 1024
   },
   "anthropic.claude-sonnet-5": {
+    "bedrock_converse_supports_strict_tools": false,
     "cache_creation_input_token_cost": 2.5e-06,
     "cache_creation_input_token_cost_above_1hr": 4e-06,
     "cache_read_input_token_cost": 2e-07,
