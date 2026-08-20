@@ -13,7 +13,7 @@ Everything else from ccusage is out of scope for now.
 
 ## Features
 
-- Daily and monthly reports
+- Hourly, daily, and monthly reports
 - JSON and table output
 - Per-model breakdowns
 - Project/instance grouping for daily
@@ -93,6 +93,23 @@ ccost daily --agent codex
 ccost daily --since 20250101 --until 20250131
 ccost daily --timezone UTC
 ```
+
+Hourly (ccost extension, not in ccusage):
+
+```bash
+ccost hourly
+ccost hourly --json
+ccost hourly --breakdown
+ccost hourly --since 20250101 --until 20250131
+ccost hourly --timezone UTC
+```
+
+`hourly` takes the same flags as `daily`. `--since`/`--until` stay at day
+resolution (`YYYYMMDD`) and include every hour of the given days.
+
+Devin transcripts only expose session-level totals, so a Devin session is
+attributed entirely to the hour of its first step (the same limitation already
+applies to `daily` for sessions crossing midnight).
 
 Monthly:
 

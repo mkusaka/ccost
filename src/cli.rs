@@ -8,7 +8,7 @@ use crate::table::{
     ModelBreakdownRow, TableMode, TokenFormat, UsageDataRow, build_breakdown_rows,
     build_totals_row, build_usage_row,
 };
-use crate::time_utils::{SortOrder, format_date_compact};
+use crate::time_utils::{Granularity, SortOrder, format_date_compact, format_hour_compact};
 use anyhow::{Result, anyhow};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use comfy_table::Table;
@@ -19,7 +19,7 @@ use terminal_size::terminal_size;
 #[command(
     name = "ccost",
     version,
-    about = "Claude Code / Codex / OpenCode / Devin usage report (daily/monthly)"
+    about = "Claude Code / Codex / OpenCode / Devin usage report (hourly/daily/monthly)"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -28,6 +28,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    Hourly(DailyArgs),
     Daily(DailyArgs),
     Monthly(MonthlyArgs),
 }
@@ -205,7 +206,8 @@ pub fn run() -> Result<()> {
     }
     let cli = Cli::parse_from(args);
     match cli.command {
-        Command::Daily(args) => run_daily(args),
+        Command::Hourly(args) => run_daily(args, Granularity::Hour),
+        Command::Daily(args) => run_daily(args, Granularity::Day),
         Command::Monthly(args) => run_monthly(args),
     }
 }
@@ -239,8 +241,9 @@ fn common_options(args: &CommonArgs) -> Result<LoadOptions> {
     })
 }
 
-fn run_daily(args: DailyArgs) -> Result<()> {
+fn run_daily(args: DailyArgs, granularity: Granularity) -> Result<()> {
     let mut options = common_options(&args.common)?;
+    options.granularity = granularity;
     options.group_by_project = args.instances;
     options.project = args.project.clone();
 
@@ -273,8 +276,12 @@ fn run_daily(args: DailyArgs) -> Result<()> {
             });
             println!("{}", serde_json::to_string_pretty(&json)?);
         } else {
+            let key = match granularity {
+                Granularity::Day => "daily",
+                Granularity::Hour => "hourly",
+            };
             let json = serde_json::json!({
-                "daily": daily.into_iter().map(|entry| daily_entry_output(entry, true)).collect::<Vec<_>>(),
+                key: daily.into_iter().map(|entry| daily_entry_output(entry, true)).collect::<Vec<_>>(),
                 "totals": totals_output(totals)
             });
             println!("{}", serde_json::to_string_pretty(&json)?);
@@ -282,11 +289,15 @@ fn run_daily(args: DailyArgs) -> Result<()> {
         return Ok(());
     }
 
-    println!("{}", report_title("Daily", &args.common));
+    let (period_label, column_label) = match granularity {
+        Granularity::Day => ("Daily", "Date"),
+        Granularity::Hour => ("Hourly", "Hour"),
+    };
+    println!("{}", report_title(period_label, &args.common));
 
     let mode = table_mode(args.common.compact);
     let token_format = token_format(args.common.kmb);
-    let mut table = usage_table("Date", mode);
+    let mut table = usage_table(column_label, mode);
 
     if args.instances && daily.iter().any(|d| d.project.is_some()) {
         let grouped = group_daily_by_project(&daily);
@@ -299,8 +310,7 @@ fn run_daily(args: DailyArgs) -> Result<()> {
             header_row[0] = format!("Project: {project}");
             table.add_row(header_row);
             for entry in entries {
-                let first_col = format_date_compact(&entry.date, args.common.timezone.as_deref())
-                    .unwrap_or(entry.date.clone());
+                let first_col = format_period_column(&entry.date, granularity, &args.common);
                 let row = build_usage_row(
                     &first_col,
                     &usage_row_from_daily(&entry),
@@ -319,8 +329,7 @@ fn run_daily(args: DailyArgs) -> Result<()> {
         }
     } else {
         for entry in &daily {
-            let first_col = format_date_compact(&entry.date, args.common.timezone.as_deref())
-                .unwrap_or(entry.date.clone());
+            let first_col = format_period_column(&entry.date, granularity, &args.common);
             let row = build_usage_row(&first_col, &usage_row_from_daily(entry), mode, token_format);
             table.add_row(row);
             if args.common.breakdown {
@@ -409,6 +418,14 @@ fn run_monthly(args: MonthlyArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn format_period_column(period: &str, granularity: Granularity, args: &CommonArgs) -> String {
+    match granularity {
+        Granularity::Day => format_date_compact(period, args.timezone.as_deref())
+            .unwrap_or_else(|| period.to_string()),
+        Granularity::Hour => format_hour_compact(period).unwrap_or_else(|| period.to_string()),
+    }
 }
 
 fn table_mode(force_compact: bool) -> TableMode {
@@ -621,7 +638,7 @@ mod tests {
                 .unwrap();
         match parsed.command {
             Command::Daily(args) => args.common,
-            Command::Monthly(_) => unreachable!(),
+            Command::Hourly(_) | Command::Monthly(_) => unreachable!(),
         }
     }
 

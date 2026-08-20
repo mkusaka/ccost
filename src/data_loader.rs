@@ -1,6 +1,6 @@
 use crate::pricing::{CacheCreationTokens, CostMode, PricingFetcher, UsageTokens};
 use crate::time_utils::{
-    SortOrder, filter_by_date_range, format_date_with_tz, format_month, sort_by_date,
+    Granularity, SortOrder, filter_by_date_range, format_date_with_tz, format_month, sort_by_date,
 };
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -424,6 +424,7 @@ pub struct LoadOptions {
     pub since: Option<String>,
     pub until: Option<String>,
     pub timezone: Option<String>,
+    pub granularity: Granularity,
 }
 
 impl Default for LoadOptions {
@@ -445,6 +446,7 @@ impl Default for LoadOptions {
             since: None,
             until: None,
             timezone: None,
+            granularity: Granularity::Day,
         }
     }
 }
@@ -607,7 +609,7 @@ fn parse_file_records(
             Some(ts) => ts,
             None => return Ok(()),
         };
-        let date = match format_date_with_tz(timestamp, timezone) {
+        let date = match format_date_with_tz(timestamp, timezone, options.granularity) {
             Some(date) => date,
             None => return Ok(()),
         };
@@ -1750,6 +1752,7 @@ fn detect_codex_replay_burst_start(file: &Path) -> Option<DateTime<Utc>> {
 fn parse_codex_file_records(
     file: &Path,
     timezone: Option<chrono_tz::Tz>,
+    granularity: Granularity,
     replay_prefix: Option<&CodexReplayPrefix>,
 ) -> Result<ParsedFileRecords> {
     let mut records = Vec::new();
@@ -1862,7 +1865,7 @@ fn parse_codex_file_records(
             replay_burst_previous = None;
         }
 
-        let date = match format_date_with_tz(timestamp, timezone) {
+        let date = match format_date_with_tz(timestamp, timezone, granularity) {
             Some(date) => date,
             None => return Ok(()),
         };
@@ -1954,7 +1957,7 @@ fn parse_opencode_message(
         .and_then(|time| time.created)
         .or(created_override)?;
     let created_dt = DateTime::<Utc>::from_timestamp_millis(created)?;
-    let date = format_date_with_tz(&created_dt.to_rfc3339(), timezone)?;
+    let date = format_date_with_tz(&created_dt.to_rfc3339(), timezone, options.granularity)?;
     let tokens = extract_opencode_usage_tokens(&message)?;
     let total_tokens = total_tokens_from_usage(&tokens);
     let cost = calculate_cost_for_opencode_entry(&message, &tokens, options.mode, pricing);
@@ -2361,7 +2364,14 @@ fn load_codex_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
 
     let mut parsed_files = files
         .par_iter()
-        .map(|file| parse_codex_file_records(file, parsed_timezone, replay_prefixes.get(file)))
+        .map(|file| {
+            parse_codex_file_records(
+                file,
+                parsed_timezone,
+                options.granularity,
+                replay_prefixes.get(file),
+            )
+        })
         .collect::<Result<Vec<_>>>()?;
     parsed_files.sort_by(compare_parsed_file_records);
 
@@ -2641,7 +2651,8 @@ fn load_devin_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
             let Some(timestamp) = devin_timestamp(&transcript, info) else {
                 continue;
             };
-            let Some(date) = format_date_with_tz(&timestamp, parsed_timezone) else {
+            let Some(date) = format_date_with_tz(&timestamp, parsed_timezone, options.granularity)
+            else {
                 continue;
             };
             let cached = metrics.total_cached_tokens.unwrap_or(0);
@@ -3087,6 +3098,71 @@ mod tests {
         assert_eq!(result[0].input_tokens, 600);
         assert_eq!(result[0].output_tokens, 300);
         assert_eq!(result[0].total_cost, 0.06);
+    }
+
+    #[test]
+    fn hourly_granularity_splits_day_and_preserves_totals() {
+        let fixture = create_fixture();
+        let data = [
+            json!({
+                "timestamp": "2024-01-01T10:15:00Z",
+                "message": { "usage": { "input_tokens": 100, "output_tokens": 50 } },
+                "costUSD": 0.01
+            }),
+            json!({
+                "timestamp": "2024-01-01T10:45:00Z",
+                "message": { "usage": { "input_tokens": 200, "output_tokens": 100 } },
+                "costUSD": 0.02
+            }),
+            json!({
+                "timestamp": "2024-01-01T18:00:00Z",
+                "message": { "usage": { "input_tokens": 300, "output_tokens": 150 } },
+                "costUSD": 0.03
+            }),
+        ];
+        write_file(
+            fixture.path(),
+            "projects/project1/session1/file1.jsonl",
+            &data
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+
+        let options = LoadOptions {
+            claude_path: Some(fixture.path().to_path_buf()),
+            timezone: Some("UTC".to_string()),
+            order: SortOrder::Asc,
+            since: Some("20240101".to_string()),
+            until: Some("20240101".to_string()),
+            ..LoadOptions::default()
+        };
+        let daily = load_daily_usage_data(options.clone()).unwrap();
+        let hourly = load_daily_usage_data(LoadOptions {
+            granularity: Granularity::Hour,
+            ..options
+        })
+        .unwrap();
+
+        assert_eq!(daily.len(), 1);
+        assert_eq!(
+            hourly.iter().map(|e| e.date.as_str()).collect::<Vec<_>>(),
+            vec!["2024-01-01T10", "2024-01-01T18"]
+        );
+        assert_eq!(hourly[0].input_tokens, 300);
+        assert_eq!(hourly[1].input_tokens, 300);
+        assert_eq!(
+            hourly.iter().map(|e| e.input_tokens).sum::<u64>(),
+            daily[0].input_tokens
+        );
+        assert_eq!(
+            hourly.iter().map(|e| e.total_tokens).sum::<u64>(),
+            daily[0].total_tokens
+        );
+        assert!(
+            (hourly.iter().map(|e| e.total_cost).sum::<f64>() - daily[0].total_cost).abs() < 1e-9
+        );
     }
 
     #[test]

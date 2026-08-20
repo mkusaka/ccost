@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone};
+use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike};
 use chrono_tz::Tz;
 use std::str::FromStr;
 use std::sync::LazyLock;
@@ -24,26 +24,52 @@ impl FromStr for SortOrder {
     }
 }
 
+/// Time bucket used as the aggregation key: `2024-08-04` or `2024-08-04T13`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Granularity {
+    #[default]
+    Day,
+    Hour,
+}
+
 pub fn format_date(timestamp: &str, timezone: Option<&str>) -> Option<String> {
     let tz = match timezone {
         Some(tz_str) => Some(Tz::from_str(tz_str).ok()?),
         None => None,
     };
-    format_date_with_tz(timestamp, tz)
+    format_date_with_tz(timestamp, tz, Granularity::Day)
 }
 
-pub fn format_date_with_tz(timestamp: &str, timezone: Option<Tz>) -> Option<String> {
+pub fn format_date_with_tz(
+    timestamp: &str,
+    timezone: Option<Tz>,
+    granularity: Granularity,
+) -> Option<String> {
     let parsed = DateTime::parse_from_rfc3339(timestamp).ok()?;
-    let date = match timezone {
-        Some(tz) => parsed.with_timezone(&tz).date_naive(),
-        None => parsed.with_timezone(&Local).date_naive(),
-    };
-    Some(format!(
+    Some(match timezone {
+        Some(tz) => format_period(&parsed.with_timezone(&tz), granularity),
+        None => format_period(&parsed.with_timezone(&Local), granularity),
+    })
+}
+
+fn format_period<T: TimeZone>(datetime: &DateTime<T>, granularity: Granularity) -> String {
+    let date = format!(
         "{:04}-{:02}-{:02}",
-        date.year(),
-        date.month(),
-        date.day()
-    ))
+        datetime.year(),
+        datetime.month(),
+        datetime.day()
+    );
+    match granularity {
+        Granularity::Day => date,
+        Granularity::Hour => format!("{date}T{:02}", datetime.hour()),
+    }
+}
+
+/// Formats an hourly key (`2024-08-04T13`) for the table's first column.
+/// The key is already in the report timezone, so no conversion happens here.
+pub fn format_hour_compact(period: &str) -> Option<String> {
+    let (date, hour) = period.split_once('T')?;
+    Some(format!("{date}\n{hour}:00"))
 }
 
 pub fn format_month(date_str: &str) -> Option<String> {
@@ -108,13 +134,15 @@ where
         .into_iter()
         .filter(|item| {
             let date_str = get_date(item).replace('-', "");
+            // Hourly keys carry a `T13` suffix; since/until stay at day resolution.
+            let date_str = date_str.get(..8).unwrap_or(date_str.as_str());
             if let Some(since) = since
-                && date_str.as_str() < since
+                && date_str < since
             {
                 return false;
             }
             if let Some(until) = until
-                && date_str.as_str() > until
+                && date_str > until
             {
                 return false;
             }
@@ -164,6 +192,36 @@ mod tests {
     fn format_date_compact_with_timezone() {
         let result = format_date_compact("2024-08-04T12:00:00Z", Some("UTC")).unwrap();
         assert_eq!(result, "2024\n08-04");
+    }
+
+    #[test]
+    fn format_date_with_tz_supports_hourly_granularity() {
+        let parsed = "2024-08-04T13:30:00Z";
+        let tz = Some(Tz::from_str("UTC").unwrap());
+        assert_eq!(
+            format_date_with_tz(parsed, tz, Granularity::Hour).unwrap(),
+            "2024-08-04T13"
+        );
+        assert_eq!(
+            format_date_with_tz(parsed, tz, Granularity::Day).unwrap(),
+            "2024-08-04"
+        );
+    }
+
+    #[test]
+    fn format_hour_compact_formats_with_newline() {
+        assert_eq!(
+            format_hour_compact("2024-08-04T13").unwrap(),
+            "2024-08-04\n13:00"
+        );
+        assert!(format_hour_compact("2024-08-04").is_none());
+    }
+
+    #[test]
+    fn filter_by_date_range_keeps_hourly_entries_on_boundary_days() {
+        let items = vec!["2024-01-01T23", "2024-01-02T00", "2024-01-02T23"];
+        let filtered = filter_by_date_range(items, |item| item, Some("20240102"), Some("20240102"));
+        assert_eq!(filtered, vec!["2024-01-02T00", "2024-01-02T23"]);
     }
 
     #[test]
