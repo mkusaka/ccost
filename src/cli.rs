@@ -13,7 +13,36 @@ use anyhow::{Result, anyhow};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use comfy_table::Table;
 use serde::Serialize;
+use std::io::Write;
 use terminal_size::terminal_size;
+
+fn write_output<W: Write>(writer: &mut W, args: std::fmt::Arguments<'_>) -> Result<()> {
+    if let Err(e) = writer.write_fmt(args) {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            return Ok(());
+        }
+        return Err(e.into());
+    }
+    if let Err(e) = writer.write_all(b"\n") {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            return Ok(());
+        }
+        return Err(e.into());
+    }
+    Ok(())
+}
+
+macro_rules! println_safe {
+    ($fmt:literal $(, $arg:expr)*) => {
+        write_output(&mut std::io::stdout().lock(), format_args!($fmt $(, $arg)*))?
+    };
+}
+
+macro_rules! eprintln_safe {
+    ($fmt:literal $(, $arg:expr)*) => {
+        write_output(&mut std::io::stderr().lock(), format_args!($fmt $(, $arg)*))?
+    };
+}
 
 #[derive(Parser)]
 #[command(
@@ -250,9 +279,9 @@ fn run_daily(args: DailyArgs, granularity: Granularity) -> Result<()> {
     let daily = load_daily_usage_data(options)?;
     if daily.is_empty() {
         if args.common.json {
-            println!("[]");
+            println_safe!("[]");
         } else {
-            eprintln!("No usage data found.");
+            eprintln_safe!("No usage data found.");
         }
         return Ok(());
     }
@@ -274,7 +303,7 @@ fn run_daily(args: DailyArgs, granularity: Granularity) -> Result<()> {
                 "projects": projects_output,
                 "totals": totals_output(totals)
             });
-            println!("{}", serde_json::to_string_pretty(&json)?);
+            println_safe!("{}", serde_json::to_string_pretty(&json)?);
         } else {
             let key = match granularity {
                 Granularity::Day => "daily",
@@ -284,7 +313,7 @@ fn run_daily(args: DailyArgs, granularity: Granularity) -> Result<()> {
                 key: daily.into_iter().map(|entry| daily_entry_output(entry, true)).collect::<Vec<_>>(),
                 "totals": totals_output(totals)
             });
-            println!("{}", serde_json::to_string_pretty(&json)?);
+            println_safe!("{}", serde_json::to_string_pretty(&json)?);
         }
         return Ok(());
     }
@@ -293,7 +322,7 @@ fn run_daily(args: DailyArgs, granularity: Granularity) -> Result<()> {
         Granularity::Day => ("Daily", "Date"),
         Granularity::Hour => ("Hourly", "Hour"),
     };
-    println!("{}", report_title(period_label, &args.common));
+    println_safe!("{}", report_title(period_label, &args.common));
 
     let mode = table_mode(args.common.compact);
     let token_format = token_format(args.common.kmb);
@@ -346,11 +375,11 @@ fn run_daily(args: DailyArgs, granularity: Granularity) -> Result<()> {
         mode,
         token_format,
     ));
-    println!("{table}");
+    println_safe!("{table}");
 
     if matches!(mode, TableMode::Compact) {
-        println!("\nRunning in Compact Mode");
-        println!("Expand terminal width to see cache metrics and total tokens");
+        println_safe!("\nRunning in Compact Mode");
+        println_safe!("Expand terminal width to see cache metrics and total tokens");
     }
 
     Ok(())
@@ -365,9 +394,9 @@ fn run_monthly(args: MonthlyArgs) -> Result<()> {
                 "monthly": [],
                 "totals": totals_output(UsageTotals::default())
             });
-            println!("{}", serde_json::to_string_pretty(&empty)?);
+            println_safe!("{}", serde_json::to_string_pretty(&empty)?);
         } else {
-            eprintln!("No usage data found.");
+            eprintln_safe!("No usage data found.");
         }
         return Ok(());
     }
@@ -379,11 +408,11 @@ fn run_monthly(args: MonthlyArgs) -> Result<()> {
             "monthly": monthly.into_iter().map(monthly_entry_output).collect::<Vec<_>>(),
             "totals": totals_output(totals)
         });
-        println!("{}", serde_json::to_string_pretty(&json)?);
+        println_safe!("{}", serde_json::to_string_pretty(&json)?);
         return Ok(());
     }
 
-    println!("{}", report_title("Monthly", &args.common));
+    println_safe!("{}", report_title("Monthly", &args.common));
 
     let mode = table_mode(args.common.compact);
     let token_format = token_format(args.common.kmb);
@@ -410,11 +439,11 @@ fn run_monthly(args: MonthlyArgs) -> Result<()> {
         mode,
         token_format,
     ));
-    println!("{table}");
+    println_safe!("{table}");
 
     if matches!(mode, TableMode::Compact) {
-        println!("\nRunning in Compact Mode");
-        println!("Expand terminal width to see cache metrics and total tokens");
+        println_safe!("\nRunning in Compact Mode");
+        println_safe!("Expand terminal width to see cache metrics and total tokens");
     }
 
     Ok(())
@@ -722,5 +751,30 @@ mod tests {
 
         assert_eq!(json["inputTokens"].as_u64(), Some(69_960_297_352));
         assert_eq!(json["totalTokens"].as_u64(), Some(69_960_297_352));
+    }
+
+    struct BrokenPipe;
+
+    impl Write for BrokenPipe {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "broken pipe",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn write_output_succeeds_and_ignores_broken_pipe() {
+        let mut buf = Vec::new();
+        assert!(write_output(&mut buf, format_args!("hello")).is_ok());
+        assert_eq!(buf, b"hello\n");
+
+        let mut broken = BrokenPipe;
+        assert!(write_output(&mut broken, format_args!("hello")).is_ok());
     }
 }
