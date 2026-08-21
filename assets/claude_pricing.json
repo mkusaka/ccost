@@ -209,7 +209,9 @@
     "supports_vision": true,
     "supports_native_structured_output": true,
     "supports_parallel_tool_use_config": true,
-    "prompt_cache_min_tokens": 4096
+    "prompt_cache_min_tokens": 4096,
+    "input_cost_per_token_batches": 5e-07,
+    "output_cost_per_token_batches": 2.5e-06
   },
   "anthropic.claude-haiku-4-5@20251001": {
     "cache_creation_input_token_cost": 1.25e-06,
@@ -557,7 +559,9 @@
     "supports_vision": true,
     "supports_native_structured_output": true,
     "supports_parallel_tool_use_config": true,
-    "prompt_cache_min_tokens": 1024
+    "prompt_cache_min_tokens": 1024,
+    "input_cost_per_token_batches": 1.5e-06,
+    "output_cost_per_token_batches": 7.5e-06
   },
   "anthropic.claude-sonnet-4-6": {
     "supports_adaptive_thinking": true,
@@ -774,6 +778,7 @@
     "prompt_cache_min_tokens": 1024
   },
   "claude-fable-5": {
+    "deprecation_date": "2027-06-09",
     "cache_creation_input_token_cost": 1.25e-05,
     "cache_creation_input_token_cost_above_1hr": 2e-05,
     "cache_read_input_token_cost": 1e-06,
@@ -790,6 +795,7 @@
       "search_context_size_medium": 0.01
     },
     "supports_adaptive_thinking": true,
+    "supports_mid_conversation_system": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
@@ -806,9 +812,11 @@
       "us": 1.1
     },
     "supports_output_config": true,
-    "prompt_cache_min_tokens": 512
+    "prompt_cache_min_tokens": 512,
+    "supports_native_structured_output": true
   },
   "claude-haiku-4-5": {
+    "deprecation_date": "2026-10-15",
     "cache_creation_input_token_cost": 1.25e-06,
     "cache_creation_input_token_cost_above_1hr": 2e-06,
     "cache_read_input_token_cost": 1e-07,
@@ -832,6 +840,7 @@
     "prompt_cache_min_tokens": 4096
   },
   "claude-haiku-4-5-20251001": {
+    "deprecation_date": "2026-10-15",
     "cache_creation_input_token_cost": 1.25e-06,
     "cache_creation_input_token_cost_above_1hr": 2e-06,
     "cache_read_input_token_cost": 1e-07,
@@ -873,6 +882,7 @@
     },
     "source": "https://docs.claude.com/en/docs/about-claude/models/overview",
     "supports_adaptive_thinking": true,
+    "supports_mid_conversation_system": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
@@ -885,7 +895,8 @@
     "supports_sampling_params": false,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_xhigh_reasoning_effort": true
+    "supports_xhigh_reasoning_effort": true,
+    "supports_native_structured_output": true
   },
   "claude-mythos-preview": {
     "cache_creation_input_token_cost": 1.25e-05,
@@ -918,7 +929,8 @@
     "supports_sampling_params": false,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_xhigh_reasoning_effort": true
+    "supports_xhigh_reasoning_effort": true,
+    "supports_native_structured_output": true
   },
   "claude-opus-4-1": {
     "cache_creation_input_token_cost": 1.875e-05,
@@ -1007,6 +1019,7 @@
     "prompt_cache_min_tokens": 1024
   },
   "claude-opus-4-5": {
+    "deprecation_date": "2026-11-24",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1036,6 +1049,7 @@
     "prompt_cache_min_tokens": 4096
   },
   "claude-opus-4-5-20251101": {
+    "deprecation_date": "2026-11-24",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1065,6 +1079,7 @@
     "prompt_cache_min_tokens": 4096
   },
   "claude-opus-4-6": {
+    "deprecation_date": "2027-02-05",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1101,6 +1116,7 @@
     "prompt_cache_min_tokens": 4096
   },
   "claude-opus-4-6-20260205": {
+    "deprecation_date": "2027-02-05",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1137,6 +1153,7 @@
     "prompt_cache_min_tokens": 4096
   },
   "claude-opus-4-7": {
+    "deprecation_date": "2027-04-16",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1175,6 +1192,7 @@
     "prompt_cache_min_tokens": 2048
   },
   "claude-opus-4-7-20260416": {
+    "deprecation_date": "2027-04-16",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1213,6 +1231,7 @@
     "prompt_cache_min_tokens": 2048
   },
   "claude-opus-4-8": {
+    "deprecation_date": "2027-05-28",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1229,6 +1248,7 @@
       "search_context_size_medium": 0.01
     },
     "supports_adaptive_thinking": true,
+    "supports_mid_conversation_system": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
@@ -1251,6 +1271,7 @@
     "prompt_cache_min_tokens": 1024
   },
   "claude-opus-5": {
+    "deprecation_date": "2027-07-24",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1267,6 +1288,7 @@
       "search_context_size_medium": 0.01
     },
     "supports_adaptive_thinking": true,
+    "supports_mid_conversation_system": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
@@ -1321,6 +1343,7 @@
     "prompt_cache_min_tokens": 1024
   },
   "claude-sonnet-4-5": {
+    "deprecation_date": "2026-09-29",
     "cache_creation_input_token_cost": 3.75e-06,
     "cache_creation_input_token_cost_above_1hr": 6e-06,
     "cache_creation_input_token_cost_above_1hr_above_200k_tokens": 1.2e-05,
@@ -1354,6 +1377,7 @@
     "prompt_cache_min_tokens": 1024
   },
   "claude-sonnet-4-5-20250929": {
+    "deprecation_date": "2026-09-29",
     "cache_creation_input_token_cost": 3.75e-06,
     "cache_creation_input_token_cost_above_1hr": 6e-06,
     "cache_creation_input_token_cost_above_1hr_above_200k_tokens": 1.2e-05,
@@ -1414,17 +1438,20 @@
     "supports_tool_choice": true,
     "supports_vision": true,
     "supports_parallel_tool_use_config": true,
-    "prompt_cache_min_tokens": 1024
+    "prompt_cache_min_tokens": 1024,
+    "input_cost_per_token_batches": 1.5e-06,
+    "output_cost_per_token_batches": 7.5e-06
   },
   "claude-sonnet-4-6": {
+    "deprecation_date": "2027-02-17",
     "cache_creation_input_token_cost": 3.75e-06,
     "cache_creation_input_token_cost_above_1hr": 6e-06,
     "cache_read_input_token_cost": 3e-07,
     "input_cost_per_token": 3e-06,
     "litellm_provider": "anthropic",
     "max_input_tokens": 1000000,
-    "max_output_tokens": 64000,
-    "max_tokens": 64000,
+    "max_output_tokens": 128000,
+    "max_tokens": 128000,
     "mode": "chat",
     "output_cost_per_token": 1.5e-05,
     "search_context_cost_per_query": {
@@ -1448,6 +1475,7 @@
     "prompt_cache_min_tokens": 1024
   },
   "claude-sonnet-5": {
+    "deprecation_date": "2027-06-30",
     "cache_creation_input_token_cost": 2.5e-06,
     "cache_creation_input_token_cost_above_1hr": 4e-06,
     "cache_read_input_token_cost": 2e-07,
@@ -1464,6 +1492,7 @@
       "search_context_size_medium": 0.01
     },
     "supports_adaptive_thinking": true,
+    "supports_mid_conversation_system": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
