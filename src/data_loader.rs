@@ -2302,8 +2302,14 @@ fn parse_agent_session_file(
     let Ok(file_handle) = File::open(file) else {
         return Vec::new();
     };
+    let mut reader = BufReader::with_capacity(64 * 1024, file_handle);
+    let mut line = Vec::new();
     let mut records = Vec::new();
-    for line in BufReader::new(file_handle).split(b'\n').flatten() {
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line).ok().unwrap_or(0) == 0 {
+            break;
+        }
         if !line_contains_any_marker(&line, &[USAGE_FIELD_MARKER]) {
             continue;
         }
@@ -2347,16 +2353,7 @@ fn parse_agent_session_file(
         );
         let model = raw_model.map(|model| format!("[{source_name}] {model}"));
         records.push(ParsedRecord {
-            unique_hash: Some(format!(
-                "{source_name}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
-                file.display(),
-                timestamp,
-                raw_model.unwrap_or_default(),
-                tokens.input_tokens,
-                tokens.output_tokens,
-                tokens.cache_creation_input_tokens,
-                tokens.cache_read_input_tokens,
-            )),
+            unique_hash: None,
             message_id: None,
             request_id: None,
             is_sidechain: None,
@@ -2392,49 +2389,53 @@ fn load_agent_session_daily_usage_data(
     }
     let pricing = (!matches!(options.mode, CostMode::Display)).then(PricingFetcher::new);
     let needs_project_grouping = options.group_by_project || options.project.is_some();
-    let mut seen = HashSet::new();
-    let mut aggregates = HashMap::new();
-    for file in files {
-        let project_name = source_paths
-            .iter()
-            .find(|path| file.starts_with(path))
-            .and_then(|path| file.strip_prefix(path).ok())
-            .and_then(|relative| relative.components().next())
-            .map(|component| component.as_os_str().to_string_lossy().into_owned())
-            .unwrap_or_else(|| "unknown".to_string());
-        if options
-            .project
-            .as_deref()
-            .is_some_and(|project| project != project_name)
-        {
-            continue;
-        }
-        let project = needs_project_grouping.then(|| Arc::from(project_name));
-        for record in parse_agent_session_file(
-            &file,
-            source_name,
-            parsed_timezone,
-            options.granularity,
-            options.mode,
-            pricing.as_ref(),
-            project,
-        ) {
-            let Some(unique_hash) = record.unique_hash.as_ref() else {
-                continue;
-            };
-            if !seen.insert(unique_hash.clone()) {
-                continue;
+    let file_projects = files
+        .into_iter()
+        .filter_map(|file| {
+            let project = (needs_project_grouping).then(|| {
+                source_paths
+                    .iter()
+                    .find(|path| file.starts_with(path))
+                    .and_then(|path| file.strip_prefix(path).ok())
+                    .and_then(|relative| relative.components().next())
+                    .map(|component| component.as_os_str().to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "unknown".to_string())
+            });
+            if options
+                .project
+                .as_deref()
+                .is_some_and(|filter| project.as_deref() != Some(filter))
+            {
+                return None;
             }
-            aggregate_usage_record(
-                &mut aggregates,
-                (record.date, record.project),
-                needs_project_grouping,
-                record.model.as_deref(),
-                &record.tokens,
-                record.total_tokens,
-                record.cost,
-            );
-        }
+            Some((file, project.map(Arc::<str>::from)))
+        })
+        .collect::<Vec<_>>();
+    let parsed_files = file_projects
+        .par_iter()
+        .map(|(file, project)| {
+            parse_agent_session_file(
+                file,
+                source_name,
+                parsed_timezone,
+                options.granularity,
+                options.mode,
+                pricing.as_ref(),
+                project.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut aggregates = HashMap::new();
+    for record in parsed_files.into_iter().flatten() {
+        aggregate_usage_record(
+            &mut aggregates,
+            (record.date, record.project),
+            needs_project_grouping,
+            record.model.as_deref(),
+            &record.tokens,
+            record.total_tokens,
+            record.cost,
+        );
     }
     let entries = filter_by_date_range(
         aggregates_to_daily_usage(aggregates),
