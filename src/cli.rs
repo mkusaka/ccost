@@ -467,12 +467,12 @@ fn format_period_column(period: &str, granularity: Granularity, args: &CommonArg
     }
 }
 
+fn terminal_width() -> u16 {
+    terminal_size().map(|(width, _)| width.0).unwrap_or(120)
+}
+
 fn table_mode(force_compact: bool) -> TableMode {
-    if force_compact {
-        return TableMode::Compact;
-    }
-    let width = terminal_size().map(|(w, _)| w.0 as usize).unwrap_or(120);
-    if width < 100 {
+    if force_compact || terminal_width() < 160 {
         TableMode::Compact
     } else {
         TableMode::Full
@@ -533,6 +533,7 @@ fn usage_table(first_column: &str, mode: TableMode) -> UsageTable {
 
     let mut table = Table::new();
     table.load_preset("││──╞═╪╡│─┼├┤┬┴┌┐└┘");
+    table.set_width(terminal_width());
     table.set_header(headers);
     UsageTable { table, mode }
 }
