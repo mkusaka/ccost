@@ -26,6 +26,10 @@ const CODEX_ARCHIVED_SESSIONS_DIR_NAME: &str = "archived_sessions";
 const CODEX_CONFIG_FILENAME: &str = "config.toml";
 const DEFAULT_CODEX_PATH: &str = ".codex";
 const LEGACY_FALLBACK_CODEX_MODEL: &str = "gpt-5";
+const PI_AGENT_DIR_ENV: &str = "PI_AGENT_DIR";
+const DEFAULT_PI_AGENT_PATH: &str = ".pi/agent/sessions";
+const OMP_AGENT_DIR_ENV: &str = "OMP_AGENT_DIR";
+const DEFAULT_OMP_AGENT_PATH: &str = ".omp/agent/sessions";
 const OPENCODE_DATA_DIR_ENV: &str = "OPENCODE_DATA_DIR";
 const DEFAULT_OPENCODE_PATH: &str = ".local/share/opencode";
 const OPENCODE_STORAGE_DIR_NAME: &str = "storage";
@@ -74,6 +78,12 @@ fn default_opencode_data_path() -> PathBuf {
         return PathBuf::from(home).join(DEFAULT_OPENCODE_PATH);
     }
     PathBuf::from(DEFAULT_OPENCODE_PATH)
+}
+
+fn default_agent_sessions_path(relative_path: &str) -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(relative_path)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -190,6 +200,36 @@ struct TimestampOnly {
     timestamp: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct PiSessionEntry {
+    #[serde(rename = "type")]
+    entry_type: Option<String>,
+    timestamp: Option<String>,
+    message: Option<PiSessionMessage>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PiSessionMessage {
+    role: Option<String>,
+    model: Option<String>,
+    usage: Option<PiSessionUsage>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PiSessionUsage {
+    input: Option<u64>,
+    output: Option<u64>,
+    cache_read: Option<u64>,
+    cache_write: Option<u64>,
+    total_tokens: Option<u64>,
+    cost: Option<PiSessionCost>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PiSessionCost {
+    total: Option<f64>,
+}
 #[derive(Debug, Clone, Deserialize)]
 struct CodexEntry {
     timestamp: Option<String>,
@@ -410,6 +450,8 @@ impl Aggregate {
 pub struct LoadOptions {
     pub claude_path: Option<PathBuf>,
     pub codex_path: Option<PathBuf>,
+    pub pi_path: Option<PathBuf>,
+    pub omp_path: Option<PathBuf>,
     pub opencode_path: Option<PathBuf>,
     pub devin_path: Option<PathBuf>,
     pub mode: CostMode,
@@ -417,6 +459,8 @@ pub struct LoadOptions {
     pub offline: bool,
     pub codex: bool,
     pub claudecode: bool,
+    pub pi: bool,
+    pub omp: bool,
     pub opencode: bool,
     pub devin: bool,
     pub group_by_project: bool,
@@ -432,6 +476,8 @@ impl Default for LoadOptions {
         Self {
             claude_path: None,
             codex_path: None,
+            pi_path: None,
+            omp_path: None,
             opencode_path: None,
             devin_path: None,
             mode: CostMode::Auto,
@@ -439,6 +485,8 @@ impl Default for LoadOptions {
             offline: true,
             codex: false,
             claudecode: true,
+            pi: false,
+            omp: false,
             opencode: false,
             devin: false,
             group_by_project: false,
@@ -2192,6 +2240,234 @@ fn aggregates_to_daily_usage(aggregates: HashMap<GroupKey, Aggregate>) -> Vec<Da
     }
     results
 }
+fn agent_session_paths(
+    env_name: &str,
+    default_path: &str,
+    custom_path: Option<&Path>,
+) -> Vec<PathBuf> {
+    if let Some(path) = custom_path {
+        return path
+            .is_dir()
+            .then(|| path.to_path_buf())
+            .into_iter()
+            .collect();
+    }
+    if let Ok(value) = std::env::var(env_name) {
+        let paths = value
+            .split(',')
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>();
+        if !paths.is_empty() {
+            return paths;
+        }
+    }
+    let path = default_agent_sessions_path(default_path);
+    path.is_dir().then_some(path).into_iter().collect()
+}
+
+fn glob_agent_session_files(paths: &[PathBuf]) -> Vec<PathBuf> {
+    paths
+        .iter()
+        .flat_map(|path| {
+            WalkDir::new(path)
+                .parallelism(jwalk::Parallelism::RayonNewPool(0))
+                .follow_links(true)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry.file_type().is_file()
+                        && entry
+                            .path()
+                            .extension()
+                            .is_some_and(|extension| extension == "jsonl")
+                })
+                .map(|entry| entry.path().to_path_buf())
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn parse_agent_session_file(
+    file: &Path,
+    source_name: &str,
+    timezone: Option<chrono_tz::Tz>,
+    granularity: Granularity,
+    mode: CostMode,
+    pricing: Option<&PricingFetcher>,
+    project: Option<Arc<str>>,
+) -> Vec<ParsedRecord> {
+    let Ok(file_handle) = File::open(file) else {
+        return Vec::new();
+    };
+    let mut records = Vec::new();
+    for line in BufReader::new(file_handle).split(b'\n').flatten() {
+        if !line_contains_any_marker(&line, &[USAGE_FIELD_MARKER]) {
+            continue;
+        }
+        let Ok(entry) = sonic_rs::from_slice::<PiSessionEntry>(&line) else {
+            continue;
+        };
+        if entry.entry_type.as_deref() != Some("message") {
+            continue;
+        }
+        let (Some(timestamp), Some(message)) = (entry.timestamp.as_deref(), entry.message) else {
+            continue;
+        };
+        if message.role.as_deref() != Some("assistant") {
+            continue;
+        }
+        let Some(usage) = message.usage else {
+            continue;
+        };
+        let tokens = UsageTokens {
+            input_tokens: usage.input.unwrap_or(0),
+            output_tokens: usage.output.unwrap_or(0),
+            cache_creation_input_tokens: usage.cache_write.unwrap_or(0),
+            cache_read_input_tokens: usage.cache_read.unwrap_or(0),
+        };
+        let token_sum = total_tokens_from_usage(&tokens);
+        let total_tokens = token_sum.max(usage.total_tokens.unwrap_or(0));
+        if total_tokens == 0 {
+            continue;
+        }
+        let Some(date) = format_date_with_tz(timestamp, timezone, granularity) else {
+            continue;
+        };
+        let raw_model = message.model.as_deref();
+        let cost = calculate_cost_for_usage(
+            raw_model,
+            &tokens,
+            None,
+            usage.cost.and_then(|cost| cost.total),
+            mode,
+            pricing,
+        );
+        let model = raw_model.map(|model| format!("[{source_name}] {model}"));
+        records.push(ParsedRecord {
+            unique_hash: Some(format!(
+                "{source_name}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
+                file.display(),
+                timestamp,
+                raw_model.unwrap_or_default(),
+                tokens.input_tokens,
+                tokens.output_tokens,
+                tokens.cache_creation_input_tokens,
+                tokens.cache_read_input_tokens,
+            )),
+            message_id: None,
+            request_id: None,
+            is_sidechain: None,
+            date,
+            project: project.clone(),
+            model,
+            tokens,
+            total_tokens,
+            cost,
+        });
+    }
+    records
+}
+
+fn load_agent_session_daily_usage_data(
+    options: &LoadOptions,
+    env_name: &str,
+    default_path: &str,
+    custom_path: Option<&Path>,
+    source_name: &str,
+) -> Result<Vec<DailyUsage>> {
+    let parsed_timezone = match options.timezone.as_deref() {
+        Some(tz) => match Tz::from_str(tz) {
+            Ok(tz) => Some(tz),
+            Err(_) => return Ok(Vec::new()),
+        },
+        None => None,
+    };
+    let source_paths = agent_session_paths(env_name, default_path, custom_path);
+    let files = glob_agent_session_files(&source_paths);
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+    let pricing = (!matches!(options.mode, CostMode::Display)).then(PricingFetcher::new);
+    let needs_project_grouping = options.group_by_project || options.project.is_some();
+    let mut seen = HashSet::new();
+    let mut aggregates = HashMap::new();
+    for file in files {
+        let project_name = source_paths
+            .iter()
+            .find(|path| file.starts_with(path))
+            .and_then(|path| file.strip_prefix(path).ok())
+            .and_then(|relative| relative.components().next())
+            .map(|component| component.as_os_str().to_string_lossy().into_owned())
+            .unwrap_or_else(|| "unknown".to_string());
+        if options
+            .project
+            .as_deref()
+            .is_some_and(|project| project != project_name)
+        {
+            continue;
+        }
+        let project = needs_project_grouping.then(|| Arc::from(project_name));
+        for record in parse_agent_session_file(
+            &file,
+            source_name,
+            parsed_timezone,
+            options.granularity,
+            options.mode,
+            pricing.as_ref(),
+            project,
+        ) {
+            let Some(unique_hash) = record.unique_hash.as_ref() else {
+                continue;
+            };
+            if !seen.insert(unique_hash.clone()) {
+                continue;
+            }
+            aggregate_usage_record(
+                &mut aggregates,
+                (record.date, record.project),
+                needs_project_grouping,
+                record.model.as_deref(),
+                &record.tokens,
+                record.total_tokens,
+                record.cost,
+            );
+        }
+    }
+    let entries = filter_by_date_range(
+        aggregates_to_daily_usage(aggregates),
+        |item| item.date.as_str(),
+        options.since.as_deref(),
+        options.until.as_deref(),
+    );
+    Ok(sort_by_date(
+        entries,
+        |item| item.date.as_str(),
+        options.order,
+    ))
+}
+
+fn load_pi_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>> {
+    load_agent_session_daily_usage_data(
+        options,
+        PI_AGENT_DIR_ENV,
+        DEFAULT_PI_AGENT_PATH,
+        options.pi_path.as_deref(),
+        "Pi",
+    )
+}
+
+fn load_omp_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>> {
+    load_agent_session_daily_usage_data(
+        options,
+        OMP_AGENT_DIR_ENV,
+        DEFAULT_OMP_AGENT_PATH,
+        options.omp_path.as_deref(),
+        "OMP",
+    )
+}
 
 fn load_claude_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>> {
     let parsed_timezone = match options.timezone.as_deref() {
@@ -2791,6 +3067,12 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
     }
     if options.codex {
         all_entries.extend(load_codex_daily_usage_data(&options)?);
+    }
+    if options.pi {
+        all_entries.extend(load_pi_daily_usage_data(&options)?);
+    }
+    if options.omp {
+        all_entries.extend(load_omp_daily_usage_data(&options)?);
     }
     if options.opencode {
         all_entries.extend(load_opencode_daily_usage_data(&options)?);
@@ -5456,5 +5738,80 @@ mod tests {
                 .any(|m| m == "claude-sonnet-4-20250514")
         );
         assert!(result[0].models_used.iter().any(|m| m == "gpt-5"));
+    }
+    #[test]
+    fn loads_pi_and_omp_session_usage() {
+        let fixture = create_fixture();
+        let pi_record = json!({
+            "type": "message",
+            "timestamp": "2026-08-26T12:00:00Z",
+            "message": {
+                "role": "assistant",
+                "model": "claude-sonnet-4-20250514",
+                "usage": {
+                    "input": 10,
+                    "output": 5,
+                    "cacheRead": 3,
+                    "cacheWrite": 2,
+                    "totalTokens": 20,
+                    "cost": { "total": 0.25 }
+                }
+            }
+        });
+        let omp_record = json!({
+            "type": "message",
+            "timestamp": "2026-08-26T12:30:00Z",
+            "message": {
+                "role": "assistant",
+                "model": "gpt-5.6-terra",
+                "usage": {
+                    "input": 7,
+                    "totalTokens": 7,
+                    "cost": { "total": 0.10 }
+                }
+            }
+        });
+        write_file(
+            fixture.path(),
+            "pi/project-a/2026-08-26_session.jsonl",
+            &pi_record.to_string(),
+        );
+        write_file(
+            fixture.path(),
+            "omp/project-b/2026-08-26_session.jsonl",
+            &omp_record.to_string(),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            claudecode: false,
+            pi: true,
+            omp: true,
+            pi_path: Some(fixture.path().join("pi")),
+            omp_path: Some(fixture.path().join("omp")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Auto,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].input_tokens, 17);
+        assert_eq!(result[0].output_tokens, 5);
+        assert_eq!(result[0].cache_creation_tokens, 2);
+        assert_eq!(result[0].cache_read_tokens, 3);
+        assert_eq!(result[0].total_tokens, 27);
+        assert_eq!(result[0].total_cost, 0.35);
+        assert!(
+            result[0]
+                .models_used
+                .iter()
+                .any(|model| model == "[Pi] claude-sonnet-4-20250514")
+        );
+        assert!(
+            result[0]
+                .models_used
+                .iter()
+                .any(|model| model == "[OMP] gpt-5.6-terra")
+        );
     }
 }

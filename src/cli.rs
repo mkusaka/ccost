@@ -48,7 +48,7 @@ macro_rules! eprintln_safe {
 #[command(
     name = "ccost",
     version,
-    about = "Claude Code / Codex / OpenCode / Devin usage report (hourly/daily/monthly)"
+    about = "Claude Code / Codex / Pi / OMP / OpenCode / Devin usage report (hourly/daily/monthly)"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -66,6 +66,8 @@ pub enum Command {
 enum Agent {
     Codex,
     Claudecode,
+    Pi,
+    Omp,
     Opencode,
     Devin,
     All,
@@ -75,6 +77,8 @@ enum Agent {
 struct AgentFlags {
     codex: bool,
     claudecode: bool,
+    pi: bool,
+    omp: bool,
     opencode: bool,
     devin: bool,
 }
@@ -84,6 +88,8 @@ impl AgentFlags {
         Self {
             codex: true,
             claudecode: true,
+            pi: true,
+            omp: true,
             opencode: true,
             devin: true,
         }
@@ -122,7 +128,7 @@ pub struct CommonArgs {
         value_enum,
         value_delimiter = ',',
         default_value = "all",
-        help = "Usage data source: all, codex, claudecode, opencode, or devin"
+        help = "Usage data source: all, codex, claudecode, pi, omp, opencode, or devin"
     )]
     agent: Vec<Agent>,
 }
@@ -136,6 +142,8 @@ impl CommonArgs {
         AgentFlags {
             codex: self.agent.contains(&Agent::Codex),
             claudecode: self.agent.contains(&Agent::Claudecode),
+            pi: self.agent.contains(&Agent::Pi),
+            omp: self.agent.contains(&Agent::Omp),
             opencode: self.agent.contains(&Agent::Opencode),
             devin: self.agent.contains(&Agent::Devin),
         }
@@ -261,6 +269,8 @@ fn common_options(args: &CommonArgs) -> Result<LoadOptions> {
         offline: args.offline,
         codex: agents.codex,
         claudecode: agents.claudecode,
+        pi: agents.pi,
+        omp: agents.omp,
         opencode: agents.opencode,
         devin: agents.devin,
         since: args.since.clone(),
@@ -486,6 +496,12 @@ fn report_title(period: &str, args: &CommonArgs) -> String {
     if agents.codex {
         sources.push("Codex");
     }
+    if agents.pi {
+        sources.push("Pi");
+    }
+    if agents.omp {
+        sources.push("OMP");
+    }
     if agents.opencode {
         sources.push("OpenCode");
     }
@@ -678,7 +694,7 @@ mod tests {
         assert_eq!(common.agent_flags(), AgentFlags::all());
         assert_eq!(
             report_title("Daily", &common),
-            "Claude Code + Codex + OpenCode + Devin Token Usage Report - Daily"
+            "Claude Code + Codex + Pi + OMP + OpenCode + Devin Token Usage Report - Daily"
         );
     }
 
@@ -691,6 +707,8 @@ mod tests {
             AgentFlags {
                 codex: true,
                 claudecode: false,
+                pi: false,
+                omp: false,
                 opencode: false,
                 devin: false,
             }
@@ -710,6 +728,8 @@ mod tests {
             AgentFlags {
                 codex: true,
                 claudecode: false,
+                pi: false,
+                omp: false,
                 opencode: true,
                 devin: false,
             }
@@ -717,6 +737,16 @@ mod tests {
         assert_eq!(
             report_title("Daily", &common),
             "Codex + OpenCode Token Usage Report - Daily"
+        );
+    }
+
+    #[test]
+    fn agent_accepts_pi_and_omp_sources() {
+        let common = parse_daily_common(&["--agent=pi,omp"]);
+
+        assert_eq!(
+            report_title("Daily", &common),
+            "Pi + OMP Token Usage Report - Daily"
         );
     }
 
