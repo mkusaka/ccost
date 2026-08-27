@@ -354,6 +354,7 @@
   },
   "anthropic.claude-opus-4-6-v1": {
     "supports_adaptive_thinking": true,
+    "supports_legacy_thinking": true,
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -567,6 +568,7 @@
   },
   "anthropic.claude-sonnet-4-6": {
     "supports_adaptive_thinking": true,
+    "supports_legacy_thinking": true,
     "cache_creation_input_token_cost": 3.75e-06,
     "cache_creation_input_token_cost_above_1hr": 6e-06,
     "cache_read_input_token_cost": 3e-07,
@@ -1101,6 +1103,7 @@
       "search_context_size_medium": 0.01
     },
     "supports_adaptive_thinking": true,
+    "supports_legacy_thinking": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
@@ -1138,6 +1141,7 @@
       "search_context_size_medium": 0.01
     },
     "supports_adaptive_thinking": true,
+    "supports_legacy_thinking": true,
     "supports_assistant_prefill": false,
     "supports_computer_use": true,
     "supports_function_calling": true,
@@ -1465,6 +1469,7 @@
       "search_context_size_medium": 0.01
     },
     "supports_adaptive_thinking": true,
+    "supports_legacy_thinking": true,
     "supports_assistant_prefill": true,
     "supports_computer_use": true,
     "supports_function_calling": true,
