@@ -11,7 +11,7 @@ use crate::table::{
 use crate::time_utils::{Granularity, SortOrder, format_date_compact, format_hour_compact};
 use anyhow::{Result, anyhow};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use comfy_table::Table;
+use comfy_table::{ContentLineStyle, LineStyle, Table, TableStyle};
 use serde::Serialize;
 use std::io::Write;
 use terminal_size::terminal_size;
@@ -532,7 +532,15 @@ fn usage_table(first_column: &str, mode: TableMode) -> UsageTable {
     };
 
     let mut table = Table::new();
-    table.load_preset("││──╞═╪╡│─┼├┤┬┴┌┐└┘");
+    table.load_style(
+        TableStyle::new()
+            .top_border(LineStyle::new('┌', '─', '┬', '┐'))
+            .header_lines(ContentLineStyle::new('│', '│', '│'))
+            .header_separator(LineStyle::new('╞', '═', '╪', '╡'))
+            .content_lines(ContentLineStyle::new('│', '│', '│'))
+            .row_separator(LineStyle::new('├', '─', '┼', '┤'))
+            .bottom_border(LineStyle::new('└', '─', '┴', '┘')),
+    );
     table.set_width(terminal_width());
     table.set_header(headers);
     UsageTable { table, mode }
