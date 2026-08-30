@@ -818,7 +818,8 @@
     },
     "supports_output_config": true,
     "prompt_cache_min_tokens": 512,
-    "supports_native_structured_output": true
+    "supports_native_structured_output": true,
+    "source": "https://docs.anthropic.com/en/docs/about-claude/models/overview"
   },
   "claude-haiku-4-5": {
     "deprecation_date": "2026-10-15",
@@ -1319,7 +1320,8 @@
     },
     "supports_output_config": true,
     "supports_speed": true,
-    "prompt_cache_min_tokens": 512
+    "prompt_cache_min_tokens": 512,
+    "source": "https://docs.anthropic.com/en/docs/about-claude/models/overview"
   },
   "claude-sonnet-4-20250514": {
     "deprecation_date": "2026-06-15",
@@ -1525,6 +1527,7 @@
       "us": 1.1
     },
     "supports_output_config": true,
-    "prompt_cache_min_tokens": 1024
+    "prompt_cache_min_tokens": 1024,
+    "source": "https://docs.anthropic.com/en/docs/about-claude/models/overview"
   }
 }
