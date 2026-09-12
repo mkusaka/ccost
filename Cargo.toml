@@ -9,7 +9,7 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 clap = { version = "4.5", features = ["derive"] }
 comfy-table = "8.0"
-dirs = "6"
+dirs = "7"
 jwalk = "0.9"
 memchr = "2"
 num-format = "0.4"
