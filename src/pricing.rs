@@ -142,6 +142,8 @@ impl PricingFetcher {
                     "gemini-3-pro".to_string(),
                     "gemini-3-pro-preview".to_string(),
                 ),
+                ("SWE-1.7".to_string(), "cognition/swe-1.7".to_string()),
+                ("SWE-1.7 Max".to_string(), "cognition/swe-1.7".to_string()),
                 (
                     "kimi-k2.5".to_string(),
                     "openrouter/moonshotai/kimi-k2.5".to_string(),
@@ -541,6 +543,24 @@ mod tests {
 
         assert!(fetcher.calculate_cost_from_tokens(&tokens, Some("Claude Fable 5")) > 0.0);
         assert!(fetcher.calculate_cost_from_tokens(&tokens, Some("GPT-5.6 Sol")) > 0.0);
+    }
+
+    #[test]
+    fn swe_models_resolve_to_cognition_pricing() {
+        let fetcher = PricingFetcher::new();
+        let tokens = UsageTokens {
+            input_tokens: 1_000_000,
+            output_tokens: 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        };
+
+        // SWE-2 has no published token rate; stays $0 until upstream lists it.
+        let swe17 = fetcher.calculate_cost_from_tokens(&tokens, Some("SWE-1.7 Max"));
+        let swe2 = fetcher.calculate_cost_from_tokens(&tokens, Some("SWE-2 High"));
+
+        assert!((swe17 - 0.5).abs() < 1e-9);
+        assert_eq!(swe2, 0.0);
     }
 
     #[test]

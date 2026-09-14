@@ -50,6 +50,7 @@ codex_prefixes = (
     "openrouter/moonshotai/kimi-k2.5",
     "moonshot/kimi-k2.5",
     "moonshotai.kimi-k2.5",
+    "cognition/",
 )
 
 claude_count = write_filtered(claude_output, claude_prefixes)
