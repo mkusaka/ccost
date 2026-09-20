@@ -4638,7 +4638,7 @@
     "supports_response_schema": true,
     "supports_vision": true,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/google/gemini-3-pro-image-preview": {
     "input_cost_per_token": 2e-06,
@@ -4662,7 +4662,7 @@
     "supports_response_schema": true,
     "supports_vision": true,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/google/gemini-3-pro-preview": {
     "cache_read_input_token_cost": 2e-07,
@@ -4751,7 +4751,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5-chat": {
     "cache_read_input_token_cost": 1.25e-07,
@@ -4809,7 +4809,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": false,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5-image-mini": {
     "cache_read_input_token_cost": 2.5e-07,
@@ -4829,7 +4829,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": false,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5-mini": {
     "cache_read_input_token_cost": 2.5e-08,
@@ -4856,7 +4856,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5-mini:batch": {
     "cache_read_input_token_cost": 1.25e-08,
@@ -4876,7 +4876,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5-nano": {
     "cache_read_input_token_cost": 5e-09,
@@ -4903,7 +4903,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5-nano:batch": {
     "cache_read_input_token_cost": 2.5e-09,
@@ -4923,7 +4923,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5-pro": {
     "input_cost_per_token": 1.5e-05,
@@ -4942,7 +4942,7 @@
     "supports_vision": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": false,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5-pro:batch": {
     "input_cost_per_token": 7.5e-06,
@@ -4961,7 +4961,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.1": {
     "input_cost_per_token": 1.25e-06,
@@ -4981,7 +4981,7 @@
     "supports_audio_input": false,
     "cache_read_input_token_cost": 1.25e-07,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.1-codex": {
     "input_cost_per_token": 1.25e-06,
@@ -5001,7 +5001,7 @@
     "supports_response_schema": true,
     "supports_vision": true,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.1-codex-max": {
     "cache_read_input_token_cost": 1.25e-07,
@@ -5028,7 +5028,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.1-codex-mini": {
     "input_cost_per_token": 2.5e-07,
@@ -5048,7 +5048,7 @@
     "supports_response_schema": true,
     "supports_vision": true,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.1:batch": {
     "cache_read_input_token_cost": 6.25e-08,
@@ -5068,7 +5068,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.2": {
     "input_cost_per_image": 0,
@@ -5089,7 +5089,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.2-chat": {
     "input_cost_per_image": 0,
@@ -5110,7 +5110,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.2-codex": {
     "cache_read_input_token_cost": 1.75e-07,
@@ -5137,7 +5137,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.2-pro": {
     "input_cost_per_image": 0,
@@ -5157,7 +5157,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.2-pro:batch": {
     "input_cost_per_token": 1.05e-05,
@@ -5176,7 +5176,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.2:batch": {
     "cache_read_input_token_cost": 8.75e-08,
@@ -5196,7 +5196,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.3-codex": {
     "input_cost_per_token": 1.75e-06,
@@ -5216,7 +5216,7 @@
     "supports_audio_input": false,
     "cache_read_input_token_cost": 1.75e-07,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.4": {
     "input_cost_per_token": 2.5e-06,
@@ -5239,7 +5239,7 @@
     "input_cost_per_token_above_272k_tokens": 5e-06,
     "output_cost_per_token_above_272k_tokens": 2.25e-05,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.4-image-2": {
     "cache_read_input_token_cost": 2e-06,
@@ -5259,7 +5259,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": false,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.4-mini": {
     "input_cost_per_token": 7.5e-07,
@@ -5279,7 +5279,7 @@
     "supports_audio_input": false,
     "cache_read_input_token_cost": 7.5e-08,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.4-mini:batch": {
     "cache_read_input_token_cost": 3.75e-08,
@@ -5299,7 +5299,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.4-nano": {
     "input_cost_per_token": 2e-07,
@@ -5319,7 +5319,7 @@
     "supports_audio_input": false,
     "cache_read_input_token_cost": 2e-08,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.4-nano:batch": {
     "cache_read_input_token_cost": 1e-08,
@@ -5339,7 +5339,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.4-pro": {
     "input_cost_per_token": 3e-05,
@@ -5360,7 +5360,7 @@
     "supports_vision": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": false,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.4-pro:batch": {
     "input_cost_per_token": 1.5e-05,
@@ -5381,7 +5381,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.4:batch": {
     "cache_read_input_token_cost": 1.25e-07,
@@ -5404,7 +5404,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.5": {
     "input_cost_per_token": 5e-06,
@@ -5427,7 +5427,7 @@
     "input_cost_per_token_above_272k_tokens": 1e-05,
     "output_cost_per_token_above_272k_tokens": 4.5e-05,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.5-pro": {
     "input_cost_per_token": 3e-05,
@@ -5448,7 +5448,7 @@
     "supports_vision": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": false,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.5-pro:batch": {
     "input_cost_per_token": 1.5e-05,
@@ -5469,7 +5469,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.5:batch": {
     "cache_read_input_token_cost": 2.5e-07,
@@ -5492,7 +5492,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.6-luna": {
     "cache_creation_input_token_cost": 2.5e-07,
@@ -5517,7 +5517,7 @@
     "input_cost_per_token_above_272k_tokens": 4e-07,
     "output_cost_per_token_above_272k_tokens": 1.8e-06,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.6-luna-pro": {
     "input_cost_per_token": 2e-07,
@@ -5542,7 +5542,7 @@
     "supports_vision": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.6-luna-pro:batch": {
     "cache_read_input_token_cost": 1e-08,
@@ -5565,7 +5565,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.6-luna:batch": {
     "cache_read_input_token_cost": 1e-08,
@@ -5588,7 +5588,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.6-sol": {
     "cache_creation_input_token_cost": 2.5e-06,
@@ -5629,7 +5629,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.6-sol-pro": {
     "input_cost_per_token": 2e-06,
@@ -5654,7 +5654,7 @@
     "supports_vision": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.6-sol-pro:batch": {
     "cache_creation_input_token_cost": 1.25e-06,
@@ -5679,7 +5679,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.6-sol:batch": {
     "cache_creation_input_token_cost": 1.25e-06,
@@ -5704,7 +5704,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.6-terra": {
     "cache_creation_input_token_cost": 2.5e-06,
@@ -5729,7 +5729,7 @@
     "input_cost_per_token_above_272k_tokens": 4e-06,
     "output_cost_per_token_above_272k_tokens": 1.8e-05,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.6-terra-pro": {
     "input_cost_per_token": 2e-06,
@@ -5754,7 +5754,7 @@
     "supports_vision": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.6-terra-pro:batch": {
     "cache_read_input_token_cost": 1e-07,
@@ -5777,7 +5777,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5.6-terra:batch": {
     "cache_read_input_token_cost": 1e-07,
@@ -5800,7 +5800,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "openrouter/openai/gpt-5:batch": {
     "cache_read_input_token_cost": 6.25e-08,
@@ -5820,7 +5820,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "supports_web_search": false
+    "supports_web_search": true
   },
   "vertex_ai/gemini-3-pro-image": {
     "cache_read_input_token_cost": 2e-07,

@@ -830,7 +830,6 @@
     "prompt_cache_min_tokens": 1024
   },
   "claude-fable-5": {
-    "deprecation_date": "2027-06-09",
     "cache_creation_input_token_cost": 1.25e-05,
     "cache_creation_input_token_cost_above_1hr": 2e-05,
     "cache_read_input_token_cost": 1e-06,
@@ -870,7 +869,6 @@
     "source": "https://platform.claude.com/docs/en/about-claude/pricing"
   },
   "claude-fable-5-1": {
-    "deprecation_date": "2027-09-01",
     "cache_creation_input_token_cost": 1.25e-05,
     "cache_creation_input_token_cost_above_1hr": 2e-05,
     "cache_read_input_token_cost": 2.5e-07,
@@ -911,7 +909,6 @@
     "source": "https://platform.claude.com/docs/en/about-claude/pricing"
   },
   "claude-haiku-4-5": {
-    "deprecation_date": "2026-10-15",
     "cache_creation_input_token_cost": 1.25e-06,
     "cache_creation_input_token_cost_above_1hr": 2e-06,
     "cache_read_input_token_cost": 1e-07,
@@ -936,7 +933,6 @@
     "source": "https://platform.claude.com/docs/en/about-claude/pricing"
   },
   "claude-haiku-4-5-20251001": {
-    "deprecation_date": "2026-10-15",
     "cache_creation_input_token_cost": 1.25e-06,
     "cache_creation_input_token_cost_above_1hr": 2e-06,
     "cache_read_input_token_cost": 1e-07,
@@ -999,7 +995,6 @@
     }
   },
   "claude-mythos-5-1": {
-    "deprecation_date": "2027-09-01",
     "cache_creation_input_token_cost": 1.25e-05,
     "cache_creation_input_token_cost_above_1hr": 2e-05,
     "cache_read_input_token_cost": 2.5e-07,
@@ -1164,7 +1159,6 @@
     "prompt_cache_min_tokens": 1024
   },
   "claude-opus-4-5": {
-    "deprecation_date": "2026-11-24",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1185,6 +1179,7 @@
     "supports_function_calling": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
+    "supports_thinking_cache_preservation": true,
     "supports_reasoning": true,
     "supports_response_schema": true,
     "supports_native_structured_output": true,
@@ -1195,7 +1190,6 @@
     "source": "https://platform.claude.com/docs/en/about-claude/pricing"
   },
   "claude-opus-4-5-20251101": {
-    "deprecation_date": "2026-11-24",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1216,6 +1210,7 @@
     "supports_function_calling": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
+    "supports_thinking_cache_preservation": true,
     "supports_reasoning": true,
     "supports_response_schema": true,
     "supports_native_structured_output": true,
@@ -1225,7 +1220,6 @@
     "prompt_cache_min_tokens": 4096
   },
   "claude-opus-4-6": {
-    "deprecation_date": "2027-02-05",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1248,6 +1242,7 @@
     "supports_function_calling": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
+    "supports_thinking_cache_preservation": true,
     "supports_reasoning": true,
     "supports_response_schema": true,
     "supports_native_structured_output": true,
@@ -1263,7 +1258,6 @@
     "source": "https://platform.claude.com/docs/en/about-claude/pricing"
   },
   "claude-opus-4-6-20260205": {
-    "deprecation_date": "2027-02-05",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1286,6 +1280,7 @@
     "supports_function_calling": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
+    "supports_thinking_cache_preservation": true,
     "supports_reasoning": true,
     "supports_response_schema": true,
     "supports_native_structured_output": true,
@@ -1300,7 +1295,6 @@
     "prompt_cache_min_tokens": 4096
   },
   "claude-opus-4-7": {
-    "deprecation_date": "2027-04-16",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1322,6 +1316,7 @@
     "supports_function_calling": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
+    "supports_thinking_cache_preservation": true,
     "supports_reasoning": true,
     "supports_response_schema": true,
     "supports_native_structured_output": true,
@@ -1339,7 +1334,6 @@
     "source": "https://platform.claude.com/docs/en/about-claude/pricing"
   },
   "claude-opus-4-7-20260416": {
-    "deprecation_date": "2027-04-16",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1361,6 +1355,7 @@
     "supports_function_calling": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
+    "supports_thinking_cache_preservation": true,
     "supports_reasoning": true,
     "supports_response_schema": true,
     "supports_native_structured_output": true,
@@ -1377,7 +1372,6 @@
     "prompt_cache_min_tokens": 2048
   },
   "claude-opus-4-8": {
-    "deprecation_date": "2027-05-28",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1400,6 +1394,7 @@
     "supports_function_calling": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
+    "supports_thinking_cache_preservation": true,
     "supports_reasoning": true,
     "supports_response_schema": true,
     "supports_native_structured_output": true,
@@ -1419,7 +1414,6 @@
     "source": "https://platform.claude.com/docs/en/about-claude/pricing"
   },
   "claude-opus-5": {
-    "deprecation_date": "2027-07-24",
     "cache_creation_input_token_cost": 6.25e-06,
     "cache_creation_input_token_cost_above_1hr": 1e-05,
     "cache_read_input_token_cost": 5e-07,
@@ -1442,6 +1436,7 @@
     "supports_function_calling": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
+    "supports_thinking_cache_preservation": true,
     "supports_reasoning": true,
     "supports_response_schema": true,
     "supports_native_structured_output": true,
@@ -1493,7 +1488,6 @@
     "prompt_cache_min_tokens": 1024
   },
   "claude-sonnet-4-5": {
-    "deprecation_date": "2026-09-29",
     "cache_creation_input_token_cost": 3.75e-06,
     "cache_creation_input_token_cost_above_1hr": 6e-06,
     "cache_creation_input_token_cost_above_1hr_above_200k_tokens": 1.2e-05,
@@ -1528,7 +1522,6 @@
     "source": "https://platform.claude.com/docs/en/about-claude/pricing"
   },
   "claude-sonnet-4-5-20250929": {
-    "deprecation_date": "2026-09-29",
     "cache_creation_input_token_cost": 3.75e-06,
     "cache_creation_input_token_cost_above_1hr": 6e-06,
     "cache_creation_input_token_cost_above_1hr_above_200k_tokens": 1.2e-05,
@@ -1595,7 +1588,6 @@
     "output_cost_per_token_batches": 7.5e-06
   },
   "claude-sonnet-4-6": {
-    "deprecation_date": "2027-02-17",
     "cache_creation_input_token_cost": 3.75e-06,
     "cache_creation_input_token_cost_above_1hr": 6e-06,
     "cache_read_input_token_cost": 3e-07,
@@ -1618,6 +1610,7 @@
     "supports_function_calling": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
+    "supports_thinking_cache_preservation": true,
     "supports_reasoning": true,
     "supports_response_schema": true,
     "supports_native_structured_output": true,
@@ -1632,7 +1625,6 @@
     "source": "https://platform.claude.com/docs/en/about-claude/pricing"
   },
   "claude-sonnet-5": {
-    "deprecation_date": "2027-06-30",
     "cache_creation_input_token_cost": 2.5e-06,
     "cache_creation_input_token_cost_above_1hr": 4e-06,
     "cache_read_input_token_cost": 2e-07,
@@ -1656,6 +1648,7 @@
     "supports_native_structured_output": true,
     "supports_pdf_input": true,
     "supports_prompt_caching": true,
+    "supports_thinking_cache_preservation": true,
     "supports_reasoning": true,
     "supports_response_schema": true,
     "supports_sampling_params": false,
