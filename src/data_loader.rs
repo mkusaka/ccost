@@ -3909,7 +3909,7 @@ mod tests {
         });
         let data2 = json!({
             "timestamp": "2024-01-01T11:00:00Z",
-            "message": { "usage": { "input_tokens": 2000, "output_tokens": 1000 }, "model": "claude-4-sonnet-20250514" }
+            "message": { "usage": { "input_tokens": 2000, "output_tokens": 1000 }, "model": "claude-sonnet-4-5-20250929" }
         });
         write_file(
             fixture.path(),
@@ -3981,7 +3981,7 @@ mod tests {
                     cache_read_input_tokens: None,
                     cache_creation: None,
                 }),
-                model: Some("claude-4-sonnet-20250514".to_string()),
+                model: Some("claude-sonnet-4-5-20250929".to_string()),
                 id: None,
             }),
             cost_usd: Some(99.99),
@@ -4009,7 +4009,7 @@ mod tests {
                     cache_read_input_tokens: None,
                     cache_creation: None,
                 }),
-                model: Some("claude-4-sonnet-20250514".to_string()),
+                model: Some("claude-sonnet-4-5-20250929".to_string()),
                 id: None,
             }),
             cost_usd: Some(0.05),
