@@ -267,6 +267,8 @@ struct CodexTokenUsage {
     input_tokens: Option<u64>,
     cached_input_tokens: Option<u64>,
     cache_read_input_tokens: Option<u64>,
+    cache_write_input_tokens: Option<u64>,
+    cache_creation_input_tokens: Option<u64>,
     output_tokens: Option<u64>,
     reasoning_output_tokens: Option<u64>,
     total_tokens: Option<u64>,
@@ -276,6 +278,7 @@ struct CodexTokenUsage {
 struct CodexRawUsage {
     input_tokens: u64,
     cached_input_tokens: u64,
+    cache_creation_tokens: u64,
     output_tokens: u64,
     reasoning_output_tokens: u64,
     total_tokens: u64,
@@ -1435,6 +1438,11 @@ fn normalize_codex_usage(usage: &CodexTokenUsage) -> CodexRawUsage {
         .cached_input_tokens
         .or(usage.cache_read_input_tokens)
         .unwrap_or(0);
+    let cache_creation = usage
+        .cache_write_input_tokens
+        .or(usage.cache_creation_input_tokens)
+        .unwrap_or(0)
+        .min(input.saturating_sub(cached.min(input)));
     let output = usage.output_tokens.unwrap_or(0);
     let reasoning = usage.reasoning_output_tokens.unwrap_or(0);
     let total = usage
@@ -1443,6 +1451,7 @@ fn normalize_codex_usage(usage: &CodexTokenUsage) -> CodexRawUsage {
     CodexRawUsage {
         input_tokens: input,
         cached_input_tokens: cached,
+        cache_creation_tokens: cache_creation,
         output_tokens: output,
         reasoning_output_tokens: reasoning,
         total_tokens: if total > 0 {
@@ -1463,6 +1472,9 @@ fn subtract_codex_usage(
         cached_input_tokens: current
             .cached_input_tokens
             .saturating_sub(previous.cached_input_tokens),
+        cache_creation_tokens: current
+            .cache_creation_tokens
+            .saturating_sub(previous.cache_creation_tokens),
         output_tokens: current.output_tokens.saturating_sub(previous.output_tokens),
         reasoning_output_tokens: current
             .reasoning_output_tokens
@@ -1494,11 +1506,17 @@ fn select_codex_raw_usage(
 
 fn codex_usage_to_tokens(delta: &CodexRawUsage) -> UsageTokens {
     let cached = delta.cached_input_tokens.min(delta.input_tokens);
-    let input = delta.input_tokens.saturating_sub(cached);
+    let cache_creation = delta
+        .cache_creation_tokens
+        .min(delta.input_tokens.saturating_sub(cached));
+    let input = delta
+        .input_tokens
+        .saturating_sub(cached)
+        .saturating_sub(cache_creation);
     UsageTokens {
         input_tokens: input,
         output_tokens: delta.output_tokens,
-        cache_creation_input_tokens: 0,
+        cache_creation_input_tokens: cache_creation,
         cache_read_input_tokens: cached,
     }
 }
@@ -1530,9 +1548,10 @@ fn resolve_codex_fast_speed(codex_home: &Path) -> bool {
 
 fn create_codex_unique_hash(timestamp: &str, model: &str, usage: &CodexRawUsage) -> String {
     format!(
-        "{timestamp}\0{model}\0{}\0{}\0{}\0{}\0{}",
+        "{timestamp}\0{model}\0{}\0{}\0{}\0{}\0{}\0{}",
         usage.input_tokens,
         usage.cached_input_tokens.min(usage.input_tokens),
+        usage.cache_creation_tokens,
         usage.output_tokens,
         usage.reasoning_output_tokens,
         usage.total_tokens
@@ -1678,6 +1697,7 @@ fn read_codex_usage_stream(file: &Path) -> Vec<(DateTime<Utc>, CodexRawUsage)> {
         };
         if raw_usage.input_tokens == 0
             && raw_usage.cached_input_tokens == 0
+            && raw_usage.cache_creation_tokens == 0
             && raw_usage.output_tokens == 0
             && raw_usage.reasoning_output_tokens == 0
         {
@@ -1802,6 +1822,8 @@ fn parse_codex_file_records(
     timezone: Option<chrono_tz::Tz>,
     granularity: Granularity,
     replay_prefix: Option<&CodexReplayPrefix>,
+    pricing: Option<&PricingFetcher>,
+    codex_fast_speed: bool,
 ) -> Result<ParsedFileRecords> {
     let mut records = Vec::new();
     let mut earliest_timestamp: Option<DateTime<Utc>> = None;
@@ -1869,6 +1891,7 @@ fn parse_codex_file_records(
 
         if raw_usage.input_tokens == 0
             && raw_usage.cached_input_tokens == 0
+            && raw_usage.cache_creation_tokens == 0
             && raw_usage.output_tokens == 0
             && raw_usage.reasoning_output_tokens == 0
         {
@@ -1927,7 +1950,20 @@ fn parse_codex_file_records(
         let model = resolve_codex_auto_review_model(&raw_model, timestamp);
         let tokens = codex_usage_to_tokens(&raw_usage);
         // Codex cost is recalculated after aggregation so model-level pricing is applied once.
-        let cost = 0.0;
+        // Models whose rates vary by event timestamp are priced per record instead.
+        let cost = pricing
+            .filter(|fetcher| fetcher.has_time_dependent_pricing(&model))
+            .and_then(|fetcher| {
+                DateTime::parse_from_rfc3339(timestamp).ok().map(|parsed| {
+                    fetcher.calculate_codex_cost_at(
+                        &tokens,
+                        &model,
+                        parsed.timestamp_millis(),
+                        codex_fast_speed,
+                    )
+                })
+            })
+            .unwrap_or(0.0);
 
         records.push(ParsedRecord {
             unique_hash: Some(create_codex_unique_hash(timestamp, &model, &raw_usage)),
@@ -2187,6 +2223,13 @@ fn recalculate_codex_aggregate_costs(
     for aggregate in aggregates.values_mut() {
         aggregate.total_cost = 0.0;
         for (model, stats) in &mut aggregate.model_breakdowns {
+            // Time-dependent models were priced per record during parsing;
+            // their accumulated cost stands because the rate depends on when
+            // each event ran, which the aggregated totals no longer carry.
+            if fetcher.has_time_dependent_pricing(model) {
+                aggregate.total_cost += stats.cost;
+                continue;
+            }
             let tokens = UsageTokens {
                 input_tokens: stats.input_tokens,
                 output_tokens: stats.output_tokens,
@@ -2647,6 +2690,8 @@ fn load_codex_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
                 parsed_timezone,
                 options.granularity,
                 replay_prefixes.get(file),
+                pricing_ref,
+                codex_fast_speed,
             )
         })
         .collect::<Result<Vec<_>>>()?;
@@ -5306,6 +5351,123 @@ mod tests {
 
         assert!(standard[0].total_cost > 0.0);
         assert!((fast[0].total_cost - standard[0].total_cost * 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn load_daily_usage_reports_codex_cache_write_tokens_and_cost() {
+        let fixture = create_fixture();
+        write_file(
+            fixture.path(),
+            "sessions/session-1.jsonl",
+            &[
+                json!({
+                    "timestamp": "2026-08-20T05:49:00Z",
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5.6-terra" }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-08-20T05:49:12Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 935_040,
+                                "cached_input_tokens": 875_306,
+                                "cache_write_input_tokens": 57_610,
+                                "output_tokens": 11_150,
+                                "reasoning_output_tokens": 1_141,
+                                "total_tokens": 946_190
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            ]
+            .join("\n"),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            codex: true,
+            claudecode: false,
+            codex_path: Some(fixture.path().join("sessions")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Calculate,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].input_tokens, 2_124);
+        assert_eq!(result[0].cache_creation_tokens, 57_610);
+        assert_eq!(result[0].cache_read_tokens, 875_306);
+        let expected = 2_124.0 * 2e-6 + 875_306.0 * 0.2e-6 + 57_610.0 * 2.5e-6 + 11_150.0 * 12e-6;
+        assert!((result[0].total_cost - expected).abs() < 1e-9);
+        assert_eq!(result[0].model_breakdowns[0].cache_creation_tokens, 57_610);
+    }
+
+    #[test]
+    fn load_daily_usage_prices_deepseek_v4_by_event_timestamp() {
+        let fixture = create_fixture();
+        let token_count = |timestamp: &str| {
+            json!({
+                "timestamp": timestamp,
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": 1_000_000,
+                            "cached_input_tokens": 0,
+                            "output_tokens": 0,
+                            "reasoning_output_tokens": 0,
+                            "total_tokens": 1_000_000
+                        }
+                    }
+                }
+            })
+            .to_string()
+        };
+        write_file(
+            fixture.path(),
+            "sessions/session-1.jsonl",
+            &[
+                json!({
+                    "timestamp": "2026-08-16T15:00:00Z",
+                    "type": "turn_context",
+                    "payload": { "model": "deepseek-v4-flash" }
+                })
+                .to_string(),
+                // Before the pricing cutoff: old flat rate.
+                token_count("2026-08-16T15:59:59Z"),
+                // Monday 02:00 UTC: peak window.
+                token_count("2026-08-17T02:00:00Z"),
+                // Monday 05:00 UTC: off-peak.
+                token_count("2026-08-17T05:00:00Z"),
+            ]
+            .join("\n"),
+        );
+
+        let result = load_daily_usage_data(LoadOptions {
+            codex: true,
+            claudecode: false,
+            codex_path: Some(fixture.path().join("sessions")),
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Calculate,
+            order: SortOrder::Asc,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert!((result[0].total_cost - 0.14).abs() < 1e-9);
+        assert!((result[1].total_cost - (0.44 + 0.22)).abs() < 1e-9);
+        assert_eq!(
+            result[1].model_breakdowns[0].model_name,
+            "deepseek-v4-flash"
+        );
+        assert!((result[1].model_breakdowns[0].cost - 0.66).abs() < 1e-9);
     }
 
     #[test]

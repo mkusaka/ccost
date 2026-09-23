@@ -6,6 +6,9 @@ use std::sync::OnceLock;
 const DEFAULT_TIERED_THRESHOLD: u64 = 200_000;
 const MILLION: f64 = 1_000_000.0;
 const DEFAULT_CODEX_FAST_MULTIPLIER: f64 = 2.0;
+const DEEPSEEK_V4_PRICING_CUTOFF_MS: i64 = 1_786_896_000_000;
+const MILLIS_PER_HOUR: i64 = 3_600_000;
+const MILLIS_PER_DAY: i64 = 86_400_000;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LiteLLMModelPricing {
@@ -336,6 +339,55 @@ impl PricingFetcher {
             None => return 0.0,
         };
 
+        self.calculate_codex_cost(tokens, model_name, &pricing, fast_speed)
+    }
+
+    pub(crate) fn has_time_dependent_pricing(&self, model_name: &str) -> bool {
+        deepseek_v4_model_identity(model_name).is_some()
+            || self
+                .model_aliases
+                .get(model_name)
+                .and_then(|alias| deepseek_v4_model_identity(alias))
+                .is_some()
+    }
+
+    pub(crate) fn calculate_codex_cost_at(
+        &self,
+        tokens: &UsageTokens,
+        model_name: &str,
+        timestamp_ms: i64,
+        fast_speed: bool,
+    ) -> f64 {
+        let pricing = match self.get_model_pricing_at(model_name, timestamp_ms) {
+            Some(pricing) => pricing,
+            None => return 0.0,
+        };
+        self.calculate_codex_cost(tokens, model_name, &pricing, fast_speed)
+    }
+
+    fn get_model_pricing_at(
+        &self,
+        model_name: &str,
+        timestamp_ms: i64,
+    ) -> Option<LiteLLMModelPricing> {
+        let identity = deepseek_v4_model_identity(model_name).or_else(|| {
+            self.model_aliases
+                .get(model_name)
+                .and_then(|alias| deepseek_v4_model_identity(alias))
+        });
+        match identity {
+            Some(identity) => Some(deepseek_v4_scheduled_pricing(identity, timestamp_ms)),
+            None => self.get_model_pricing(model_name),
+        }
+    }
+
+    fn calculate_codex_cost(
+        &self,
+        tokens: &UsageTokens,
+        model_name: &str,
+        pricing: &LiteLLMModelPricing,
+        fast_speed: bool,
+    ) -> f64 {
         let non_cached_input_tokens = tokens.input_tokens;
         let multiplier = if fast_speed {
             pricing
@@ -355,11 +407,18 @@ impl PricingFetcher {
             .unwrap_or(0.0)
             * MILLION
             * multiplier;
+        let cache_creation_cost_per_million = pricing
+            .cache_creation_input_token_cost
+            .unwrap_or_else(|| pricing.input_cost_per_token.unwrap_or(0.0) * 1.25)
+            * MILLION
+            * multiplier;
         let output_cost_per_million =
             pricing.output_cost_per_token.unwrap_or(0.0) * MILLION * multiplier;
 
         (non_cached_input_tokens as f64 / MILLION) * input_cost_per_million
             + (tokens.cache_read_input_tokens as f64 / MILLION) * cached_input_cost_per_million
+            + (tokens.cache_creation_input_tokens as f64 / MILLION)
+                * cache_creation_cost_per_million
             + (tokens.output_tokens as f64 / MILLION) * output_cost_per_million
     }
 }
@@ -368,6 +427,108 @@ fn codex_fast_multiplier_for_model(model_name: &str) -> f64 {
     match model_name {
         "gpt-5.5" | "gpt-5.5-2026-04-23" => 2.5,
         _ => DEFAULT_CODEX_FAST_MULTIPLIER,
+    }
+}
+
+#[derive(Clone, Copy)]
+struct DeepSeekV4Rates {
+    input: f64,
+    output: f64,
+    cache_create: f64,
+    cache_read: f64,
+}
+
+fn deepseek_v4_model_identity(model: &str) -> Option<&'static str> {
+    match model {
+        "deepseek-v4-flash" => Some("deepseek-v4-flash"),
+        "deepseek-v4-pro" => Some("deepseek-v4-pro"),
+        _ => None,
+    }
+}
+
+fn deepseek_v4_rates(model: &str, timestamp_ms: i64) -> Option<DeepSeekV4Rates> {
+    let (old, off_peak, peak) = match model {
+        "deepseek-v4-flash" => (
+            DeepSeekV4Rates {
+                input: 0.14e-6,
+                output: 0.28e-6,
+                cache_create: 0.14e-6,
+                cache_read: 0.0028e-6,
+            },
+            DeepSeekV4Rates {
+                input: 0.22e-6,
+                output: 0.66e-6,
+                cache_create: 0.22e-6,
+                cache_read: 0.007e-6,
+            },
+            DeepSeekV4Rates {
+                input: 0.44e-6,
+                output: 1.32e-6,
+                cache_create: 0.44e-6,
+                cache_read: 0.014e-6,
+            },
+        ),
+        "deepseek-v4-pro" => (
+            DeepSeekV4Rates {
+                input: 0.435e-6,
+                output: 0.87e-6,
+                cache_create: 0.435e-6,
+                cache_read: 0.003625e-6,
+            },
+            DeepSeekV4Rates {
+                input: 0.66e-6,
+                output: 1.98e-6,
+                cache_create: 0.66e-6,
+                cache_read: 0.022e-6,
+            },
+            DeepSeekV4Rates {
+                input: 1.32e-6,
+                output: 3.96e-6,
+                cache_create: 1.32e-6,
+                cache_read: 0.044e-6,
+            },
+        ),
+        _ => return None,
+    };
+    if timestamp_ms < DEEPSEEK_V4_PRICING_CUTOFF_MS {
+        return Some(old);
+    }
+    Some(if deepseek_v4_peak(timestamp_ms) {
+        peak
+    } else {
+        off_peak
+    })
+}
+
+fn deepseek_v4_peak(timestamp_ms: i64) -> bool {
+    // DeepSeek publishes these windows in UTC, so use the epoch instant rather
+    // than the report's display timezone when deriving the calendar buckets.
+    let days_since_epoch = timestamp_ms.div_euclid(MILLIS_PER_DAY);
+    // Unix epoch Thursday is weekday 4 when Sunday is zero; Euclidean modulo
+    // keeps the mapping valid for timestamps before the epoch as well.
+    let weekday_from_sunday = (days_since_epoch + 4).rem_euclid(7);
+    // Saturdays and Sundays are always off-peak.
+    if !(1..=5).contains(&weekday_from_sunday) {
+        return false;
+    }
+    // The published windows are half-open, so their ending hours are excluded.
+    let hour = timestamp_ms.rem_euclid(MILLIS_PER_DAY) / MILLIS_PER_HOUR;
+    (1..4).contains(&hour) || (6..10).contains(&hour)
+}
+
+fn deepseek_v4_scheduled_pricing(identity: &str, timestamp_ms: i64) -> LiteLLMModelPricing {
+    let rates = deepseek_v4_rates(identity, timestamp_ms).expect("scheduled model");
+    LiteLLMModelPricing {
+        input_cost_per_token: Some(rates.input),
+        output_cost_per_token: Some(rates.output),
+        cache_creation_input_token_cost: Some(rates.cache_create),
+        cache_read_input_token_cost: Some(rates.cache_read),
+        input_cost_per_token_above_200k_tokens: Some(rates.input),
+        output_cost_per_token_above_200k_tokens: Some(rates.output),
+        cache_creation_input_token_cost_above_200k_tokens: Some(rates.cache_create),
+        cache_read_input_token_cost_above_200k_tokens: Some(rates.cache_read),
+        max_input_tokens: None,
+        provider_specific_entry: Some(ProviderSpecificEntry { fast: Some(1.0) }),
     }
 }
 
