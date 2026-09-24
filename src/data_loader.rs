@@ -363,6 +363,7 @@ pub struct ModelBreakdown {
 #[derive(Debug, Clone)]
 pub struct DailyUsage {
     pub date: String,
+    pub agent: &'static str,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_creation_tokens: u64,
@@ -372,11 +373,19 @@ pub struct DailyUsage {
     pub models_used: Vec<String>,
     pub model_breakdowns: Vec<ModelBreakdown>,
     pub project: Option<String>,
+    pub agent_breakdowns: Vec<DailyUsage>,
+}
+
+impl DailyUsage {
+    pub fn agents(&self) -> Vec<&'static str> {
+        self.agent_breakdowns.iter().map(|row| row.agent).collect()
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct MonthlyUsage {
     pub month: String,
+    pub agent: &'static str,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_creation_tokens: u64,
@@ -386,6 +395,13 @@ pub struct MonthlyUsage {
     pub models_used: Vec<String>,
     pub model_breakdowns: Vec<ModelBreakdown>,
     pub project: Option<String>,
+    pub agent_breakdowns: Vec<MonthlyUsage>,
+}
+
+impl MonthlyUsage {
+    pub fn agents(&self) -> Vec<&'static str> {
+        self.agent_breakdowns.iter().map(|row| row.agent).collect()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -446,6 +462,56 @@ impl Aggregate {
         if self.models_used_seen.insert(owned.clone()) {
             self.models_used.push(owned);
         }
+    }
+
+    fn add_entry(&mut self, entry: &DailyUsage) {
+        self.input_tokens += entry.input_tokens;
+        self.output_tokens += entry.output_tokens;
+        self.cache_creation_tokens += entry.cache_creation_tokens;
+        self.cache_read_tokens += entry.cache_read_tokens;
+        self.total_tokens += entry.total_tokens;
+        self.total_cost += entry.total_cost;
+        for model in &entry.models_used {
+            self.push_model(model);
+        }
+        for breakdown in &entry.model_breakdowns {
+            update_model_breakdowns(
+                &mut self.model_breakdowns,
+                &breakdown.model_name,
+                &UsageTokens {
+                    input_tokens: breakdown.input_tokens,
+                    output_tokens: breakdown.output_tokens,
+                    cache_creation_input_tokens: breakdown.cache_creation_tokens,
+                    cache_read_input_tokens: breakdown.cache_read_tokens,
+                },
+                breakdown.total_tokens,
+                breakdown.cost,
+            );
+        }
+    }
+
+    fn sorted_model_breakdowns(
+        model_breakdowns: HashMap<String, TokenStats>,
+    ) -> Vec<ModelBreakdown> {
+        let mut model_breakdowns = model_breakdowns
+            .into_iter()
+            .filter(|(name, _)| name != "<synthetic>")
+            .map(|(model_name, stats)| ModelBreakdown {
+                model_name,
+                input_tokens: stats.input_tokens,
+                output_tokens: stats.output_tokens,
+                cache_creation_tokens: stats.cache_creation_tokens,
+                cache_read_tokens: stats.cache_read_tokens,
+                total_tokens: stats.total_tokens,
+                cost: stats.cost,
+            })
+            .collect::<Vec<_>>();
+        model_breakdowns.sort_by(|a, b| {
+            b.cost
+                .partial_cmp(&a.cost)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        model_breakdowns
     }
 }
 
@@ -2248,28 +2314,11 @@ fn aggregates_to_daily_usage(aggregates: HashMap<GroupKey, Aggregate>) -> Vec<Da
     let mut results = Vec::new();
     for ((date, project), aggregate) in aggregates {
         let project = project.map(|value| value.to_string());
-        let mut model_breakdowns = aggregate
-            .model_breakdowns
-            .into_iter()
-            .filter(|(name, _)| name != "<synthetic>")
-            .map(|(model_name, stats)| ModelBreakdown {
-                model_name,
-                input_tokens: stats.input_tokens,
-                output_tokens: stats.output_tokens,
-                cache_creation_tokens: stats.cache_creation_tokens,
-                cache_read_tokens: stats.cache_read_tokens,
-                total_tokens: stats.total_tokens,
-                cost: stats.cost,
-            })
-            .collect::<Vec<_>>();
-        model_breakdowns.sort_by(|a, b| {
-            b.cost
-                .partial_cmp(&a.cost)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        let model_breakdowns = Aggregate::sorted_model_breakdowns(aggregate.model_breakdowns);
 
         results.push(DailyUsage {
             date,
+            agent: "all",
             input_tokens: aggregate.input_tokens,
             output_tokens: aggregate.output_tokens,
             cache_creation_tokens: aggregate.cache_creation_tokens,
@@ -2279,6 +2328,7 @@ fn aggregates_to_daily_usage(aggregates: HashMap<GroupKey, Aggregate>) -> Vec<Da
             models_used: aggregate.models_used,
             model_breakdowns,
             project,
+            agent_breakdowns: Vec::new(),
         });
     }
     results
@@ -2335,7 +2385,6 @@ fn glob_agent_session_files(paths: &[PathBuf]) -> Vec<PathBuf> {
 
 fn parse_agent_session_file(
     file: &Path,
-    source_name: &str,
     timezone: Option<chrono_tz::Tz>,
     granularity: Granularity,
     mode: CostMode,
@@ -2394,7 +2443,7 @@ fn parse_agent_session_file(
             mode,
             pricing,
         );
-        let model = raw_model.map(|model| format!("[{source_name}] {model}"));
+        let model = raw_model.map(str::to_string);
         records.push(ParsedRecord {
             unique_hash: None,
             message_id: None,
@@ -2416,7 +2465,6 @@ fn load_agent_session_daily_usage_data(
     env_name: &str,
     default_path: &str,
     custom_path: Option<&Path>,
-    source_name: &str,
 ) -> Result<Vec<DailyUsage>> {
     let parsed_timezone = match options.timezone.as_deref() {
         Some(tz) => match Tz::from_str(tz) {
@@ -2459,7 +2507,6 @@ fn load_agent_session_daily_usage_data(
         .map(|(file, project)| {
             parse_agent_session_file(
                 file,
-                source_name,
                 parsed_timezone,
                 options.granularity,
                 options.mode,
@@ -2499,7 +2546,6 @@ fn load_pi_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>> {
         PI_AGENT_DIR_ENV,
         DEFAULT_PI_AGENT_PATH,
         options.pi_path.as_deref(),
-        "Pi",
     )
 }
 
@@ -2509,7 +2555,6 @@ fn load_omp_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>> {
         OMP_AGENT_DIR_ENV,
         DEFAULT_OMP_AGENT_PATH,
         options.omp_path.as_deref(),
-        "OMP",
     )
 }
 
@@ -3036,60 +3081,52 @@ fn load_devin_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
     ))
 }
 
+#[derive(Default)]
+struct GroupedAggregate {
+    total: Aggregate,
+    per_agent: HashMap<&'static str, Aggregate>,
+}
+
 fn merge_daily_usage(entries: Vec<DailyUsage>, order: SortOrder) -> Vec<DailyUsage> {
-    let mut aggregates: HashMap<(String, Option<String>), Aggregate> = HashMap::new();
+    let mut aggregates: HashMap<(String, Option<String>), GroupedAggregate> = HashMap::new();
 
     for entry in entries {
         let key = (entry.date.clone(), entry.project.clone());
-        let aggregate = aggregates.entry(key).or_default();
-        aggregate.input_tokens += entry.input_tokens;
-        aggregate.output_tokens += entry.output_tokens;
-        aggregate.cache_creation_tokens += entry.cache_creation_tokens;
-        aggregate.cache_read_tokens += entry.cache_read_tokens;
-        aggregate.total_tokens += entry.total_tokens;
-        aggregate.total_cost += entry.total_cost;
-        for model in entry.models_used {
-            aggregate.push_model(&model);
-        }
-        for breakdown in entry.model_breakdowns {
-            update_model_breakdowns(
-                &mut aggregate.model_breakdowns,
-                &breakdown.model_name,
-                &UsageTokens {
-                    input_tokens: breakdown.input_tokens,
-                    output_tokens: breakdown.output_tokens,
-                    cache_creation_input_tokens: breakdown.cache_creation_tokens,
-                    cache_read_input_tokens: breakdown.cache_read_tokens,
-                },
-                breakdown.total_tokens,
-                breakdown.cost,
-            );
-        }
+        let group = aggregates.entry(key).or_default();
+        group.total.add_entry(&entry);
+        group
+            .per_agent
+            .entry(entry.agent)
+            .or_default()
+            .add_entry(&entry);
     }
 
     let mut results = Vec::new();
-    for ((date, project), aggregate) in aggregates {
-        let mut model_breakdowns = aggregate
-            .model_breakdowns
+    for ((date, project), group) in aggregates {
+        let mut agent_breakdowns = group
+            .per_agent
             .into_iter()
-            .filter(|(name, _)| name != "<synthetic>")
-            .map(|(model_name, stats)| ModelBreakdown {
-                model_name,
-                input_tokens: stats.input_tokens,
-                output_tokens: stats.output_tokens,
-                cache_creation_tokens: stats.cache_creation_tokens,
-                cache_read_tokens: stats.cache_read_tokens,
-                total_tokens: stats.total_tokens,
-                cost: stats.cost,
+            .map(|(agent, aggregate)| DailyUsage {
+                date: date.clone(),
+                agent,
+                input_tokens: aggregate.input_tokens,
+                output_tokens: aggregate.output_tokens,
+                cache_creation_tokens: aggregate.cache_creation_tokens,
+                cache_read_tokens: aggregate.cache_read_tokens,
+                total_tokens: aggregate.total_tokens,
+                total_cost: aggregate.total_cost,
+                models_used: aggregate.models_used,
+                model_breakdowns: Aggregate::sorted_model_breakdowns(aggregate.model_breakdowns),
+                project: project.clone(),
+                agent_breakdowns: Vec::new(),
             })
             .collect::<Vec<_>>();
-        model_breakdowns.sort_by(|a, b| {
-            b.cost
-                .partial_cmp(&a.cost)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        agent_breakdowns.sort_by(|a, b| a.agent.cmp(b.agent));
+
+        let aggregate = group.total;
         results.push(DailyUsage {
             date,
+            agent: "all",
             input_tokens: aggregate.input_tokens,
             output_tokens: aggregate.output_tokens,
             cache_creation_tokens: aggregate.cache_creation_tokens,
@@ -3097,34 +3134,51 @@ fn merge_daily_usage(entries: Vec<DailyUsage>, order: SortOrder) -> Vec<DailyUsa
             total_tokens: aggregate.total_tokens,
             total_cost: aggregate.total_cost,
             models_used: aggregate.models_used,
-            model_breakdowns,
+            model_breakdowns: Aggregate::sorted_model_breakdowns(aggregate.model_breakdowns),
             project,
+            agent_breakdowns,
         });
     }
 
     sort_by_date(results, |item| item.date.as_str(), order)
 }
 
+fn tag_agent(entries: Vec<DailyUsage>, agent: &'static str) -> Vec<DailyUsage> {
+    entries
+        .into_iter()
+        .map(|mut entry| {
+            entry.agent = agent;
+            entry
+        })
+        .collect()
+}
+
 pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
     let mut all_entries = Vec::new();
 
     if options.claudecode {
-        all_entries.extend(load_claude_daily_usage_data(&options)?);
+        all_entries.extend(tag_agent(
+            load_claude_daily_usage_data(&options)?,
+            "claudecode",
+        ));
     }
     if options.codex {
-        all_entries.extend(load_codex_daily_usage_data(&options)?);
+        all_entries.extend(tag_agent(load_codex_daily_usage_data(&options)?, "codex"));
     }
     if options.pi {
-        all_entries.extend(load_pi_daily_usage_data(&options)?);
+        all_entries.extend(tag_agent(load_pi_daily_usage_data(&options)?, "pi"));
     }
     if options.omp {
-        all_entries.extend(load_omp_daily_usage_data(&options)?);
+        all_entries.extend(tag_agent(load_omp_daily_usage_data(&options)?, "omp"));
     }
     if options.opencode {
-        all_entries.extend(load_opencode_daily_usage_data(&options)?);
+        all_entries.extend(tag_agent(
+            load_opencode_daily_usage_data(&options)?,
+            "opencode",
+        ));
     }
     if options.devin {
-        all_entries.extend(load_devin_daily_usage_data(&options)?);
+        all_entries.extend(tag_agent(load_devin_daily_usage_data(&options)?, "devin"));
     }
 
     if all_entries.is_empty() {
@@ -3139,7 +3193,7 @@ pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>
         return Ok(Vec::new());
     }
 
-    let mut aggregates: HashMap<MonthKey, Aggregate> = HashMap::new();
+    let mut aggregates: HashMap<MonthKey, GroupedAggregate> = HashMap::new();
     let needs_project_grouping = options.group_by_project || options.project.is_some();
 
     for entry in daily {
@@ -3161,67 +3215,49 @@ pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>
             (month, None)
         };
 
-        let aggregate = aggregates.entry(key).or_default();
-        aggregate.input_tokens += entry.input_tokens;
-        aggregate.output_tokens += entry.output_tokens;
-        aggregate.cache_creation_tokens += entry.cache_creation_tokens;
-        aggregate.cache_read_tokens += entry.cache_read_tokens;
-        aggregate.total_tokens += entry.total_tokens;
-        aggregate.total_cost += entry.total_cost;
-        for model in entry.models_used {
-            aggregate.push_model(&model);
-        }
-        for breakdown in entry.model_breakdowns {
-            update_model_breakdowns(
-                &mut aggregate.model_breakdowns,
-                &breakdown.model_name,
-                &UsageTokens {
-                    input_tokens: breakdown.input_tokens,
-                    output_tokens: breakdown.output_tokens,
-                    cache_creation_input_tokens: breakdown.cache_creation_tokens,
-                    cache_read_input_tokens: breakdown.cache_read_tokens,
-                },
-                breakdown.total_tokens,
-                breakdown.cost,
-            );
+        let group = aggregates.entry(key).or_default();
+        group.total.add_entry(&entry);
+        for sub in &entry.agent_breakdowns {
+            group.per_agent.entry(sub.agent).or_default().add_entry(sub);
         }
     }
 
     let mut results = Vec::new();
-    for ((month, project), aggregate) in aggregates {
-        let mut model_breakdowns = aggregate
-            .model_breakdowns
+    for ((month, project), group) in aggregates {
+        let mut agent_breakdowns = group
+            .per_agent
             .into_iter()
-            .filter(|(name, _)| name != "<synthetic>")
-            .map(|(model_name, stats)| ModelBreakdown {
-                model_name,
-                input_tokens: stats.input_tokens,
-                output_tokens: stats.output_tokens,
-                cache_creation_tokens: stats.cache_creation_tokens,
-                cache_read_tokens: stats.cache_read_tokens,
-                total_tokens: stats.total_tokens,
-                cost: stats.cost,
+            .map(|(agent, aggregate)| MonthlyUsage {
+                month: month.clone(),
+                agent,
+                input_tokens: aggregate.input_tokens,
+                output_tokens: aggregate.output_tokens,
+                cache_creation_tokens: aggregate.cache_creation_tokens,
+                cache_read_tokens: aggregate.cache_read_tokens,
+                total_tokens: aggregate.total_tokens,
+                total_cost: aggregate.total_cost,
+                models_used: aggregate.models_used,
+                model_breakdowns: Aggregate::sorted_model_breakdowns(aggregate.model_breakdowns),
+                project: project.clone(),
+                agent_breakdowns: Vec::new(),
             })
             .collect::<Vec<_>>();
-        model_breakdowns.sort_by(|a, b| {
-            b.cost
-                .partial_cmp(&a.cost)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        agent_breakdowns.sort_by(|a, b| a.agent.cmp(b.agent));
 
-        let models_used = aggregate.models_used;
-
+        let aggregate = group.total;
         results.push(MonthlyUsage {
             month,
+            agent: "all",
             input_tokens: aggregate.input_tokens,
             output_tokens: aggregate.output_tokens,
             cache_creation_tokens: aggregate.cache_creation_tokens,
             cache_read_tokens: aggregate.cache_read_tokens,
             total_tokens: aggregate.total_tokens,
             total_cost: aggregate.total_cost,
-            models_used,
-            model_breakdowns,
+            models_used: aggregate.models_used,
+            model_breakdowns: Aggregate::sorted_model_breakdowns(aggregate.model_breakdowns),
             project,
+            agent_breakdowns,
         });
     }
 
@@ -5968,13 +6004,27 @@ mod tests {
             result[0]
                 .models_used
                 .iter()
-                .any(|model| model == "[Pi] claude-sonnet-4-20250514")
+                .any(|model| model == "claude-sonnet-4-20250514")
         );
         assert!(
             result[0]
                 .models_used
                 .iter()
-                .any(|model| model == "[OMP] gpt-5.6-terra")
+                .any(|model| model == "gpt-5.6-terra")
         );
+
+        assert_eq!(result[0].agents(), vec!["omp", "pi"]);
+        assert_eq!(result[0].agent_breakdowns.len(), 2);
+        let omp = &result[0].agent_breakdowns[0];
+        assert_eq!(omp.agent, "omp");
+        assert_eq!(omp.input_tokens, 7);
+        assert_eq!(omp.total_cost, 0.10);
+        let pi = &result[0].agent_breakdowns[1];
+        assert_eq!(pi.agent, "pi");
+        assert_eq!(pi.input_tokens, 10);
+        assert_eq!(pi.output_tokens, 5);
+        assert_eq!(pi.total_cost, 0.25);
+        assert_eq!(pi.models_used, vec!["claude-sonnet-4-20250514"]);
+        assert_eq!(omp.input_tokens + pi.input_tokens, result[0].input_tokens);
     }
 }

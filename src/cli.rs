@@ -131,6 +131,8 @@ pub struct CommonArgs {
         help = "Usage data source: all, codex, claudecode, pi, omp, opencode, or devin"
     )]
     agent: Vec<Agent>,
+    #[arg(long, help = "Include per-agent JSON breakdowns in report rows")]
+    by_agent: bool,
 }
 
 impl CommonArgs {
@@ -179,8 +181,22 @@ struct TotalsOutput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DailyMetadataOutput {
+struct MetadataOutput {
     agents: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentBreakdownOutput {
+    agent: String,
+    models_used: Vec<String>,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_creation_tokens: u64,
+    cache_read_tokens: u64,
+    total_tokens: u64,
+    total_cost: f64,
+    model_breakdowns: Vec<ModelBreakdownOutput>,
 }
 
 #[derive(Debug, Serialize)]
@@ -190,7 +206,7 @@ struct DailyEntryOutput {
     cache_creation_tokens: u64,
     cache_read_tokens: u64,
     input_tokens: u64,
-    metadata: DailyMetadataOutput,
+    metadata: MetadataOutput,
     model_breakdowns: Vec<ModelBreakdownOutput>,
     models_used: Vec<String>,
     output_tokens: u64,
@@ -199,12 +215,15 @@ struct DailyEntryOutput {
     total_tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agents: Option<Vec<AgentBreakdownOutput>>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MonthlyEntryOutput {
     month: String,
+    agent: String,
     input_tokens: u64,
     output_tokens: u64,
     cache_creation_tokens: u64,
@@ -213,6 +232,9 @@ struct MonthlyEntryOutput {
     total_cost: f64,
     models_used: Vec<String>,
     model_breakdowns: Vec<ModelBreakdownOutput>,
+    metadata: MetadataOutput,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agents: Option<Vec<AgentBreakdownOutput>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -305,7 +327,7 @@ fn run_daily(args: DailyArgs, granularity: Granularity) -> Result<()> {
             for (project, entries) in grouped {
                 let mapped = entries
                     .into_iter()
-                    .map(|entry| daily_entry_output(entry, false))
+                    .map(|entry| daily_entry_output(entry, false, args.common.by_agent))
                     .collect::<Vec<_>>();
                 projects_output.insert(project, mapped);
             }
@@ -320,7 +342,7 @@ fn run_daily(args: DailyArgs, granularity: Granularity) -> Result<()> {
                 Granularity::Hour => "hourly",
             };
             let json = serde_json::json!({
-                key: daily.into_iter().map(|entry| daily_entry_output(entry, true)).collect::<Vec<_>>(),
+                key: daily.into_iter().map(|entry| daily_entry_output(entry, true, args.common.by_agent)).collect::<Vec<_>>(),
                 "totals": totals_output(totals)
             });
             println_safe!("{}", serde_json::to_string_pretty(&json)?);
@@ -415,7 +437,7 @@ fn run_monthly(args: MonthlyArgs) -> Result<()> {
 
     if args.common.json {
         let json = serde_json::json!({
-            "monthly": monthly.into_iter().map(monthly_entry_output).collect::<Vec<_>>(),
+            "monthly": monthly.into_iter().map(|entry| monthly_entry_output(entry, args.common.by_agent)).collect::<Vec<_>>(),
             "totals": totals_output(totals)
         });
         println_safe!("{}", serde_json::to_string_pretty(&json)?);
@@ -608,42 +630,110 @@ fn totals_output(totals: UsageTotals) -> TotalsOutput {
     }
 }
 
-fn daily_entry_output(entry: DailyUsage, include_project: bool) -> DailyEntryOutput {
+fn agent_breakdown_output(entry: &DailyUsage) -> AgentBreakdownOutput {
+    AgentBreakdownOutput {
+        agent: entry.agent.to_string(),
+        models_used: entry.models_used.clone(),
+        input_tokens: entry.input_tokens,
+        output_tokens: entry.output_tokens,
+        cache_creation_tokens: entry.cache_creation_tokens,
+        cache_read_tokens: entry.cache_read_tokens,
+        total_tokens: entry.total_tokens,
+        total_cost: entry.total_cost,
+        model_breakdowns: entry
+            .model_breakdowns
+            .iter()
+            .cloned()
+            .map(model_breakdown_output)
+            .collect(),
+    }
+}
+
+fn monthly_agent_breakdown_output(entry: &MonthlyUsage) -> AgentBreakdownOutput {
+    AgentBreakdownOutput {
+        agent: entry.agent.to_string(),
+        models_used: entry.models_used.clone(),
+        input_tokens: entry.input_tokens,
+        output_tokens: entry.output_tokens,
+        cache_creation_tokens: entry.cache_creation_tokens,
+        cache_read_tokens: entry.cache_read_tokens,
+        total_tokens: entry.total_tokens,
+        total_cost: entry.total_cost,
+        model_breakdowns: entry
+            .model_breakdowns
+            .iter()
+            .cloned()
+            .map(model_breakdown_output)
+            .collect(),
+    }
+}
+
+fn daily_entry_output(
+    entry: DailyUsage,
+    include_project: bool,
+    by_agent: bool,
+) -> DailyEntryOutput {
     DailyEntryOutput {
         agent: "all".to_string(),
         cache_creation_tokens: entry.cache_creation_tokens,
         cache_read_tokens: entry.cache_read_tokens,
         input_tokens: entry.input_tokens,
-        metadata: DailyMetadataOutput { agents: vec![] },
+        metadata: MetadataOutput {
+            agents: entry.agents().iter().map(ToString::to_string).collect(),
+        },
         model_breakdowns: entry
             .model_breakdowns
-            .into_iter()
+            .iter()
+            .cloned()
             .map(model_breakdown_output)
             .collect(),
-        models_used: entry.models_used,
+        models_used: entry.models_used.clone(),
         output_tokens: entry.output_tokens,
-        period: entry.date,
+        period: entry.date.clone(),
         total_cost: entry.total_cost,
         total_tokens: entry.total_tokens,
-        project: if include_project { entry.project } else { None },
+        project: if include_project {
+            entry.project.clone()
+        } else {
+            None
+        },
+        agents: by_agent.then(|| {
+            entry
+                .agent_breakdowns
+                .iter()
+                .map(agent_breakdown_output)
+                .collect()
+        }),
     }
 }
 
-fn monthly_entry_output(entry: MonthlyUsage) -> MonthlyEntryOutput {
+fn monthly_entry_output(entry: MonthlyUsage, by_agent: bool) -> MonthlyEntryOutput {
     MonthlyEntryOutput {
-        month: entry.month,
+        month: entry.month.clone(),
+        agent: "all".to_string(),
         input_tokens: entry.input_tokens,
         output_tokens: entry.output_tokens,
         cache_creation_tokens: entry.cache_creation_tokens,
         cache_read_tokens: entry.cache_read_tokens,
         total_tokens: entry.total_tokens,
         total_cost: entry.total_cost,
-        models_used: entry.models_used,
+        models_used: entry.models_used.clone(),
         model_breakdowns: entry
             .model_breakdowns
-            .into_iter()
+            .iter()
+            .cloned()
             .map(model_breakdown_output)
             .collect(),
+        metadata: MetadataOutput {
+            agents: entry.agents().iter().map(ToString::to_string).collect(),
+        },
+        agents: by_agent.then(|| {
+            entry
+                .agent_breakdowns
+                .iter()
+                .map(monthly_agent_breakdown_output)
+                .collect()
+        }),
     }
 }
 
