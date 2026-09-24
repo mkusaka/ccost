@@ -2944,7 +2944,7 @@ fn load_devin_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
     let pricing = if matches!(options.mode, CostMode::Display) {
         None
     } else {
-        Some(PricingFetcher::new())
+        Some(PricingFetcher::new_devin())
     };
     let pricing_ref = pricing.as_ref();
     let needs_project_grouping = options.group_by_project || options.project.is_some();

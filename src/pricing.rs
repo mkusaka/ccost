@@ -80,6 +80,7 @@ fn pricing_dataset() -> &'static HashMap<String, LiteLLMModelPricing> {
 pub struct PricingFetcher {
     provider_prefixes: Vec<String>,
     model_aliases: HashMap<String, String>,
+    devin_pricing: bool,
 }
 
 impl Default for PricingFetcher {
@@ -182,6 +183,16 @@ impl PricingFetcher {
                 ("sonnet-4-6".to_string(), "claude-sonnet-4-6".to_string()),
                 ("sonnet-4-5".to_string(), "claude-sonnet-4-5".to_string()),
             ]),
+            devin_pricing: false,
+        }
+    }
+
+    /// Fetcher for Devin transcripts: some models are billed by Devin at rates
+    /// that differ from the provider list prices used by other agents.
+    pub(crate) fn new_devin() -> Self {
+        Self {
+            devin_pricing: true,
+            ..Self::new()
         }
     }
 
@@ -206,6 +217,36 @@ impl PricingFetcher {
                 if let Some(found) = pricing.get(&candidate) {
                     return Some(found.clone());
                 }
+            }
+        }
+
+        // Agents like Devin report display names ("DeepSeek V4.1 Flash Max") or
+        // slugs ("deepseek-v4-1-flash-max") that carry a reasoning-effort
+        // suffix. Compare a normalized, suffix-stripped form against the last
+        // segment of each pricing key, preferring unprefixed (direct-provider)
+        // entries over gateway variants.
+        let slug = normalize_model_key(model_name);
+        for form in [&slug, strip_effort_suffix(&slug).unwrap_or(&slug)] {
+            if self.devin_pricing
+                && let Some(pricing) = devin_model_pricing(form)
+            {
+                return Some(pricing);
+            }
+            let mut prefixed_match = None;
+            for (key, value) in pricing {
+                if key.contains(':') {
+                    continue;
+                }
+                let candidate = normalize_model_key(key.rsplit('/').next().unwrap_or(key));
+                if candidate == *form {
+                    if !key.contains('/') {
+                        return Some(value.clone());
+                    }
+                    prefixed_match = prefixed_match.or(Some(value));
+                }
+            }
+            if let Some(value) = prefixed_match {
+                return Some(value.clone());
             }
         }
 
@@ -423,6 +464,45 @@ impl PricingFetcher {
     }
 }
 
+fn normalize_model_key(name: &str) -> String {
+    name.to_lowercase().replace([' ', '.', '_'], "-")
+}
+
+fn devin_model_pricing(slug: &str) -> Option<LiteLLMModelPricing> {
+    // Rates shown by `devin models list`, per token: input, cached input, output.
+    // Devin-only models without per-token pricing (e.g. SWE-2 is listed as
+    // Free) are intentionally absent.
+    let (input, cached, output) = match slug {
+        "deepseek-v4-1-flash" => (0.22e-6, 0.01e-6, 0.66e-6),
+        "deepseek-v4-flash" => (0.14e-6, 0.03e-6, 0.28e-6),
+        "adaptive" => (0.5e-6, 0.1e-6, 2e-6),
+        _ => return None,
+    };
+    Some(LiteLLMModelPricing {
+        input_cost_per_token: Some(input),
+        output_cost_per_token: Some(output),
+        cache_creation_input_token_cost: Some(input),
+        cache_read_input_token_cost: Some(cached),
+        input_cost_per_token_above_200k_tokens: Some(input),
+        output_cost_per_token_above_200k_tokens: Some(output),
+        cache_creation_input_token_cost_above_200k_tokens: Some(input),
+        cache_read_input_token_cost_above_200k_tokens: Some(cached),
+        max_input_tokens: None,
+        provider_specific_entry: None,
+    })
+}
+
+fn strip_effort_suffix(slug: &str) -> Option<&str> {
+    for suffix in ["-minimal", "-xhigh", "-medium", "-high", "-low", "-max"] {
+        if let Some(stripped) = slug.strip_suffix(suffix)
+            && !stripped.is_empty()
+        {
+            return Some(stripped);
+        }
+    }
+    None
+}
+
 fn codex_fast_multiplier_for_model(model_name: &str) -> f64 {
     match model_name {
         "gpt-5.5" | "gpt-5.5-2026-04-23" => 2.5,
@@ -559,6 +639,48 @@ mod tests {
         };
         let cost = fetcher.calculate_cost_from_tokens(&tokens, Some("claude-sonnet-4-20250514"));
         assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn resolves_agent_display_names_and_effort_suffixes() {
+        let fetcher = PricingFetcher::new();
+        let cases = [
+            ("DeepSeek V4.1 Flash Max", 3e-7),
+            ("DeepSeek V4.1 Flash High", 3e-7),
+            ("deepseek-v4-1-flash-max", 3e-7),
+            ("GLM-5.2 High", 1.4e-6),
+            ("glm-5-2", 1.4e-6),
+            ("gpt-6-astra-medium", 1e-5),
+            ("SWE-1.7 Max", 5e-7),
+            ("swe-1-7", 5e-7),
+        ];
+        for (name, input_cost) in cases {
+            let pricing = fetcher
+                .get_model_pricing(name)
+                .unwrap_or_else(|| panic!("no pricing for {name}"));
+            assert_eq!(pricing.input_cost_per_token, Some(input_cost), "{name}");
+        }
+        // No public per-token pricing exists for SWE-2 yet.
+        assert!(fetcher.get_model_pricing("SWE-2 Max").is_none());
+    }
+
+    #[test]
+    fn devin_fetcher_uses_devin_rates() {
+        let fetcher = PricingFetcher::new_devin();
+        let cases = [
+            ("DeepSeek V4.1 Flash Max", 0.22e-6),
+            ("deepseek-v4-1-flash-high", 0.22e-6),
+            ("DeepSeek V4 Flash Max", 0.14e-6),
+            ("Adaptive", 0.5e-6),
+        ];
+        for (name, input_cost) in cases {
+            let pricing = fetcher
+                .get_model_pricing(name)
+                .unwrap_or_else(|| panic!("no pricing for {name}"));
+            assert_eq!(pricing.input_cost_per_token, Some(input_cost), "{name}");
+        }
+        // SWE-2 is listed as Free by `devin models list`.
+        assert!(fetcher.get_model_pricing("SWE-2 Max").is_none());
     }
 
     #[test]
