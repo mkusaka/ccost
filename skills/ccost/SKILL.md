@@ -39,7 +39,7 @@ Filter by agent source:
 
 ```bash
 ccost daily --agent codex
-ccost daily --agent claudecode
+ccost daily --agent claude
 ccost monthly --agent codex,opencode
 ```
 

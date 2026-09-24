@@ -65,7 +65,7 @@ pub enum Command {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum Agent {
     Codex,
-    Claudecode,
+    Claude,
     Pi,
     Omp,
     Opencode,
@@ -128,7 +128,7 @@ pub struct CommonArgs {
         value_enum,
         value_delimiter = ',',
         default_value = "all",
-        help = "Usage data source: all, codex, claudecode, pi, omp, opencode, or devin"
+        help = "Usage data source: all, codex, claude, pi, omp, opencode, or devin"
     )]
     agent: Vec<Agent>,
     #[arg(long, help = "Include per-agent JSON breakdowns in report rows")]
@@ -143,7 +143,7 @@ impl CommonArgs {
 
         AgentFlags {
             codex: self.agent.contains(&Agent::Codex),
-            claudecode: self.agent.contains(&Agent::Claudecode),
+            claudecode: self.agent.contains(&Agent::Claude),
             pi: self.agent.contains(&Agent::Pi),
             omp: self.agent.contains(&Agent::Omp),
             opencode: self.agent.contains(&Agent::Opencode),
@@ -168,6 +168,21 @@ pub struct MonthlyArgs {
     common: CommonArgs,
 }
 
+/// Match JavaScript `JSON.stringify` number formatting so output stays
+/// compatible with ccusage: integral values serialize without a decimal
+/// point (`0` instead of `0.0`).
+fn serialize_cost<S: serde::Serializer>(value: &f64, serializer: S) -> Result<S::Ok, S::Error> {
+    if value.is_finite()
+        && value.fract() == 0.0
+        && *value >= i64::MIN as f64
+        && *value <= i64::MAX as f64
+    {
+        serializer.serialize_i64(*value as i64)
+    } else {
+        serializer.serialize_f64(*value)
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TotalsOutput {
@@ -176,6 +191,7 @@ struct TotalsOutput {
     cache_creation_tokens: u64,
     cache_read_tokens: u64,
     total_tokens: u64,
+    #[serde(serialize_with = "serialize_cost")]
     total_cost: f64,
 }
 
@@ -195,6 +211,7 @@ struct AgentBreakdownOutput {
     cache_creation_tokens: u64,
     cache_read_tokens: u64,
     total_tokens: u64,
+    #[serde(serialize_with = "serialize_cost")]
     total_cost: f64,
     model_breakdowns: Vec<ModelBreakdownOutput>,
 }
@@ -211,6 +228,7 @@ struct DailyEntryOutput {
     models_used: Vec<String>,
     output_tokens: u64,
     period: String,
+    #[serde(serialize_with = "serialize_cost")]
     total_cost: f64,
     total_tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -229,6 +247,7 @@ struct MonthlyEntryOutput {
     cache_creation_tokens: u64,
     cache_read_tokens: u64,
     total_tokens: u64,
+    #[serde(serialize_with = "serialize_cost")]
     total_cost: f64,
     models_used: Vec<String>,
     model_breakdowns: Vec<ModelBreakdownOutput>,
@@ -245,6 +264,7 @@ struct ModelBreakdownOutput {
     output_tokens: u64,
     cache_creation_tokens: u64,
     cache_read_tokens: u64,
+    #[serde(serialize_with = "serialize_cost")]
     cost: f64,
 }
 
@@ -311,7 +331,22 @@ fn run_daily(args: DailyArgs, granularity: Granularity) -> Result<()> {
     let daily = load_daily_usage_data(options)?;
     if daily.is_empty() {
         if args.common.json {
-            println_safe!("[]");
+            let empty = if args.instances {
+                serde_json::json!({
+                    "projects": {},
+                    "totals": totals_output(UsageTotals::default())
+                })
+            } else {
+                let key = match granularity {
+                    Granularity::Day => "daily",
+                    Granularity::Hour => "hourly",
+                };
+                serde_json::json!({
+                    key: Vec::<serde_json::Value>::new(),
+                    "totals": totals_output(UsageTotals::default())
+                })
+            };
+            println_safe!("{}", serde_json::to_string_pretty(&empty)?);
         } else {
             eprintln_safe!("No usage data found.");
         }
@@ -867,6 +902,24 @@ mod tests {
         };
         assert!(args.common.json);
         assert!(args.common.kmb);
+    }
+
+    #[test]
+    fn json_cost_formats_like_javascript_numbers() {
+        let integral = serde_json::to_value(totals_output(UsageTotals {
+            total_cost: 0.0,
+            ..UsageTotals::default()
+        }))
+        .unwrap();
+        assert!(integral["totalCost"].is_i64());
+        assert_eq!(integral["totalCost"].as_i64(), Some(0));
+
+        let fractional = serde_json::to_value(totals_output(UsageTotals {
+            total_cost: 1.5,
+            ..UsageTotals::default()
+        }))
+        .unwrap();
+        assert_eq!(fractional["totalCost"].as_f64(), Some(1.5));
     }
 
     #[test]

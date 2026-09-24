@@ -3123,7 +3123,8 @@ fn merge_daily_usage(entries: Vec<DailyUsage>, order: SortOrder) -> Vec<DailyUsa
             .collect::<Vec<_>>();
         agent_breakdowns.sort_by(|a, b| a.agent.cmp(b.agent));
 
-        let aggregate = group.total;
+        let mut aggregate = group.total;
+        aggregate.models_used.sort();
         results.push(DailyUsage {
             date,
             agent: "all",
@@ -3157,10 +3158,7 @@ pub fn load_daily_usage_data(options: LoadOptions) -> Result<Vec<DailyUsage>> {
     let mut all_entries = Vec::new();
 
     if options.claudecode {
-        all_entries.extend(tag_agent(
-            load_claude_daily_usage_data(&options)?,
-            "claudecode",
-        ));
+        all_entries.extend(tag_agent(load_claude_daily_usage_data(&options)?, "claude"));
     }
     if options.codex {
         all_entries.extend(tag_agent(load_codex_daily_usage_data(&options)?, "codex"));
@@ -3244,7 +3242,8 @@ pub fn load_monthly_usage_data(options: LoadOptions) -> Result<Vec<MonthlyUsage>
             .collect::<Vec<_>>();
         agent_breakdowns.sort_by(|a, b| a.agent.cmp(b.agent));
 
-        let aggregate = group.total;
+        let mut aggregate = group.total;
+        aggregate.models_used.sort();
         results.push(MonthlyUsage {
             month,
             agent: "all",

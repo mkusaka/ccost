@@ -118,7 +118,7 @@ ccost monthly
 ccost monthly --json
 ccost monthly --kmb
 ccost monthly --breakdown
-ccost monthly --agent claudecode
+ccost monthly --agent claude
 ccost monthly --since 20250101 --until 20250131
 ccost monthly --timezone UTC
 ```
@@ -130,7 +130,7 @@ Common flags:
 - `--breakdown`: per-model breakdown
 - `--mode`: `auto` | `calculate` | `display`
 - `--offline`: use bundled pricing data (default; set `--offline=false` to fetch live pricing)
-- `--agent`: usage data source: `all` (default), `codex`, `claudecode`, or `opencode`; accepts comma-separated values such as `--agent codex,opencode`
+- `--agent`: usage data source: `all` (default), `claude`, `codex`, `pi`, `omp`, `opencode`, or `devin`; accepts comma-separated values such as `--agent codex,opencode`
 - `--order`: `asc` | `desc`
 - `--since` / `--until`: date filters in `YYYYMMDD`
 - `--timezone`: grouping timezone (e.g., `UTC`, `America/New_York`)
