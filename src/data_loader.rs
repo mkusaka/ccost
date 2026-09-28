@@ -38,6 +38,7 @@ const OPENCODE_DB_FILENAME: &str = "opencode.db";
 const DEVIN_DATA_DIR_ENV: &str = "DEVIN_DATA_DIR";
 const DEVIN_TRANSCRIPTS_DIR_NAME: &str = "transcripts";
 const DEVIN_DB_FILENAME: &str = "sessions.db";
+const DEVIN_SUMS_CACHE_FILENAME: &str = "ccost_session_sums.json";
 const TIMESTAMP_MARKER: &[u8] = b"\"timestamp\":\"";
 const USAGE_FIELD_MARKER: &[u8] = b"\"usage\"";
 const CODEX_TURN_CONTEXT_MARKER: &[u8] = b"\"turn_context\"";
@@ -345,8 +346,39 @@ struct DevinFinalMetrics {
 struct DevinSessionInfo {
     working_directory: Option<String>,
     model: Option<String>,
+    created_at: Option<i64>,
     last_activity_at: Option<i64>,
     hidden: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DevinSessionSums {
+    #[serde(rename = "la")]
+    last_activity_at: Option<i64>,
+    #[serde(rename = "i", default)]
+    input: u64,
+    #[serde(rename = "o", default)]
+    output: u64,
+    #[serde(rename = "cr", default)]
+    cache_read: u64,
+    #[serde(rename = "cc", default)]
+    cache_creation: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DevinSumsCache {
+    version: u32,
+    #[serde(default)]
+    sessions: HashMap<String, DevinSessionSums>,
+}
+
+impl Default for DevinSumsCache {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            sessions: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2925,9 +2957,9 @@ fn load_devin_session_info(data_dir: &Path) -> HashMap<String, DevinSessionInfo>
     ) else {
         return HashMap::new();
     };
-    let Ok(mut statement) = connection
-        .prepare("SELECT id, working_directory, model, last_activity_at, hidden FROM sessions")
-    else {
+    let Ok(mut statement) = connection.prepare(
+        "SELECT id, working_directory, model, created_at, last_activity_at, hidden FROM sessions",
+    ) else {
         return HashMap::new();
     };
     let Ok(rows) = statement.query_map([], |row| {
@@ -2936,8 +2968,9 @@ fn load_devin_session_info(data_dir: &Path) -> HashMap<String, DevinSessionInfo>
             DevinSessionInfo {
                 working_directory: row.get(1).ok(),
                 model: row.get(2).ok(),
-                last_activity_at: row.get(3).ok(),
-                hidden: row.get::<_, i64>(4).unwrap_or(0) != 0,
+                created_at: row.get(3).ok(),
+                last_activity_at: row.get(4).ok(),
+                hidden: row.get::<_, i64>(5).unwrap_or(0) != 0,
             },
         ))
     }) else {
@@ -2945,6 +2978,15 @@ fn load_devin_session_info(data_dir: &Path) -> HashMap<String, DevinSessionInfo>
     };
 
     rows.filter_map(Result::ok).collect()
+}
+
+fn devin_epoch_to_rfc3339(value: i64) -> Option<String> {
+    let millis = if value.abs() < 10_000_000_000 {
+        value.saturating_mul(1_000)
+    } else {
+        value
+    };
+    DateTime::<Utc>::from_timestamp_millis(millis).map(|timestamp| timestamp.to_rfc3339())
 }
 
 fn devin_timestamp(
@@ -2958,15 +3000,7 @@ fn devin_timestamp(
         .map(str::to_string)
         .or_else(|| {
             info.and_then(|info| info.last_activity_at)
-                .map(|value| {
-                    if value.abs() < 10_000_000_000 {
-                        value.saturating_mul(1_000)
-                    } else {
-                        value
-                    }
-                })
-                .and_then(DateTime::<Utc>::from_timestamp_millis)
-                .map(|timestamp| timestamp.to_rfc3339())
+                .and_then(devin_epoch_to_rfc3339)
         })
 }
 
@@ -2975,6 +3009,59 @@ fn devin_project(info: Option<&DevinSessionInfo>) -> Option<String> {
         .map(Path::new)
         .and_then(Path::file_name)
         .map(|name| name.to_string_lossy().into_owned())
+}
+
+// Devin keeps only recent transcript files; older sessions live on in
+// sessions.db. Summing per-request metrics over a session's main chain
+// reproduces final_metrics exactly.
+fn devin_session_sums(connection: &Connection, session_id: &str) -> Option<(u64, u64, u64, u64)> {
+    connection
+        .query_row(
+            "WITH RECURSIVE chain(nid) AS (
+                 SELECT main_chain_id FROM sessions
+                  WHERE id = ?1 AND main_chain_id IS NOT NULL
+                 UNION
+                 SELECT m.parent_node_id FROM message_nodes m
+                   JOIN chain c ON m.session_id = ?1 AND m.node_id = c.nid
+                  WHERE m.parent_node_id IS NOT NULL
+             )
+             SELECT SUM(json_extract(m.chat_message, '$.metadata.metrics.input_tokens')),
+                    SUM(json_extract(m.chat_message, '$.metadata.metrics.output_tokens')),
+                    SUM(json_extract(m.chat_message, '$.metadata.metrics.cache_read_tokens')),
+                    SUM(json_extract(m.chat_message, '$.metadata.metrics.cache_creation_tokens'))
+               FROM message_nodes m
+              WHERE m.session_id = ?1 AND m.node_id IN (SELECT nid FROM chain)",
+            [session_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?.unwrap_or(0).max(0) as u64,
+                    row.get::<_, Option<i64>>(1)?.unwrap_or(0).max(0) as u64,
+                    row.get::<_, Option<i64>>(2)?.unwrap_or(0).max(0) as u64,
+                    row.get::<_, Option<i64>>(3)?.unwrap_or(0).max(0) as u64,
+                ))
+            },
+        )
+        .ok()
+}
+
+fn load_devin_sums_cache(data_dir: &Path) -> DevinSumsCache {
+    std::fs::read_to_string(data_dir.join(DEVIN_SUMS_CACHE_FILENAME))
+        .ok()
+        .and_then(|content| serde_json::from_str::<DevinSumsCache>(&content).ok())
+        .filter(|cache| cache.version == 1)
+        .unwrap_or_default()
+}
+
+fn save_devin_sums_cache(data_dir: &Path, cache: &DevinSumsCache) {
+    if let Ok(content) = serde_json::to_string(cache) {
+        let _ = std::fs::write(data_dir.join(DEVIN_SUMS_CACHE_FILENAME), content);
+    }
+}
+
+fn devin_date_in_range(date: &str, since: Option<&str>, until: Option<&str>) -> bool {
+    let normalized = date.replace('-', "");
+    let normalized = normalized.get(..8).unwrap_or(normalized.as_str());
+    since.is_none_or(|s| normalized >= s) && until.is_none_or(|u| normalized <= u)
 }
 
 fn load_devin_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>> {
@@ -2997,6 +3084,7 @@ fn load_devin_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
 
     for data_dir in devin_data_paths(options) {
         let session_info = load_devin_session_info(&data_dir);
+        let mut covered_sessions: HashSet<String> = HashSet::new();
         for file in devin_transcript_files(&data_dir) {
             let Ok(content) = std::fs::read_to_string(&file) else {
                 continue;
@@ -3022,6 +3110,9 @@ fn load_devin_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
             else {
                 continue;
             };
+            if let Some(id) = session_id.clone() {
+                covered_sessions.insert(id);
+            }
             let cached = metrics.total_cached_tokens.unwrap_or(0);
             let tokens = UsageTokens {
                 input_tokens: metrics
@@ -3065,6 +3156,111 @@ fn load_devin_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
                 total_tokens,
                 cost,
             );
+        }
+
+        // Sessions whose transcripts were rotated out only exist in
+        // sessions.db; sum their per-request metrics instead.
+        let db_path = data_dir.join(DEVIN_DB_FILENAME);
+        let Ok(connection) = Connection::open_with_flags(
+            db_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) else {
+            continue;
+        };
+        let mut pending: Vec<(&String, &DevinSessionInfo)> = session_info
+            .iter()
+            .filter(|(id, info)| !info.hidden && !covered_sessions.contains(*id))
+            .collect();
+        pending.sort_by_key(|(id, _)| *id);
+        let mut cache = load_devin_sums_cache(&data_dir);
+        let uncached = pending
+            .iter()
+            .filter(|(id, info)| {
+                cache
+                    .sessions
+                    .get(*id)
+                    .is_none_or(|sums| sums.last_activity_at != info.last_activity_at)
+            })
+            .count();
+        if uncached > 50 {
+            eprintln!(
+                "ccost: summing {uncached} devin sessions from sessions.db (first run may take a while)"
+            );
+        }
+        let mut cache_dirty = false;
+        for (session_id, info) in pending {
+            let Some(timestamp) = info
+                .created_at
+                .or(info.last_activity_at)
+                .and_then(devin_epoch_to_rfc3339)
+            else {
+                continue;
+            };
+            let Some(date) = format_date_with_tz(&timestamp, parsed_timezone, options.granularity)
+            else {
+                continue;
+            };
+            if !devin_date_in_range(&date, options.since.as_deref(), options.until.as_deref()) {
+                continue;
+            }
+            let sums = match cache.sessions.get(session_id) {
+                Some(sums) if sums.last_activity_at == info.last_activity_at => sums.clone(),
+                _ => {
+                    let Some((input, output, cache_read, cache_creation)) =
+                        devin_session_sums(&connection, session_id)
+                    else {
+                        continue;
+                    };
+                    let sums = DevinSessionSums {
+                        last_activity_at: info.last_activity_at,
+                        input,
+                        output,
+                        cache_read,
+                        cache_creation,
+                    };
+                    cache.sessions.insert(session_id.clone(), sums.clone());
+                    cache_dirty = true;
+                    sums
+                }
+            };
+            let tokens = UsageTokens {
+                input_tokens: sums.input,
+                output_tokens: sums.output,
+                cache_creation_input_tokens: sums.cache_creation,
+                cache_read_input_tokens: sums.cache_read,
+            };
+            let total_tokens = total_tokens_from_usage(&tokens);
+            if total_tokens == 0 {
+                continue;
+            }
+            let project = devin_project(Some(info)).map(Arc::<str>::from);
+            if options
+                .project
+                .as_deref()
+                .is_some_and(|wanted| project.as_deref() != Some(wanted))
+            {
+                continue;
+            }
+            let cost = calculate_cost_for_usage(
+                info.model.as_deref(),
+                &tokens,
+                None,
+                None,
+                options.mode,
+                pricing_ref,
+            );
+            aggregate_usage_record(
+                &mut aggregates,
+                (date, project),
+                needs_project_grouping,
+                info.model.as_deref(),
+                &tokens,
+                total_tokens,
+                cost,
+            );
+        }
+        if cache_dirty {
+            save_devin_sums_cache(&data_dir, &cache);
         }
     }
 
@@ -5834,13 +6030,13 @@ mod tests {
         let connection = Connection::open(devin_path.join(DEVIN_DB_FILENAME)).unwrap();
         connection
             .execute(
-                "CREATE TABLE sessions (id TEXT, working_directory TEXT, model TEXT, last_activity_at INTEGER, hidden INTEGER)",
+                "CREATE TABLE sessions (id TEXT, working_directory TEXT, model TEXT, created_at INTEGER, last_activity_at INTEGER, hidden INTEGER)",
                 [],
             )
             .unwrap();
         connection
             .execute(
-                "INSERT INTO sessions VALUES ('session-1', '/work/example-project', 'gpt-5', 1782345600000, 0), ('hidden', '/work/hidden', 'gpt-5', 1782345600000, 1)",
+                "INSERT INTO sessions VALUES ('session-1', '/work/example-project', 'gpt-5', 1782345600000, 1782345600000, 0), ('hidden', '/work/hidden', 'gpt-5', 1782345600000, 1782345600000, 1)",
                 [],
             )
             .unwrap();
@@ -5861,6 +6057,63 @@ mod tests {
         assert_eq!(result[0].input_tokens, 90);
         assert_eq!(result[0].output_tokens, 50);
         assert_eq!(result[0].cache_read_tokens, 10);
+    }
+
+    #[test]
+    fn load_daily_usage_counts_devin_sessions_without_transcripts() {
+        let fixture = create_fixture();
+        let devin_path = fixture.path().join("devin");
+        std::fs::create_dir_all(&devin_path).unwrap();
+        let connection = Connection::open(devin_path.join(DEVIN_DB_FILENAME)).unwrap();
+        connection
+            .execute(
+                "CREATE TABLE sessions (id TEXT, working_directory TEXT, model TEXT, created_at INTEGER, last_activity_at INTEGER, hidden INTEGER, main_chain_id INTEGER)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "CREATE TABLE message_nodes (session_id TEXT, node_id INTEGER, parent_node_id INTEGER, chat_message TEXT, created_at INTEGER)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO sessions VALUES ('db-only', '/work/db-project', 'gpt-5', 1782000000, 1782000100, 0, 3)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO message_nodes VALUES
+                 ('db-only', 1, NULL, '{}', 1782000000),
+                 ('db-only', 2, 1, '{\"metadata\":{\"metrics\":{\"input_tokens\":100,\"output_tokens\":10,\"cache_read_tokens\":5}}}', 1782000000),
+                 ('db-only', 3, 2, '{\"metadata\":{\"metrics\":{\"input_tokens\":50,\"output_tokens\":20,\"cache_creation_tokens\":7}}}', 1782000000),
+                 ('db-only', 4, NULL, '{\"metadata\":{\"metrics\":{\"input_tokens\":999}}}', 1782000000)",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+
+        let result = load_daily_usage_data(LoadOptions {
+            claudecode: false,
+            devin: true,
+            devin_path: Some(devin_path),
+            group_by_project: true,
+            timezone: Some("UTC".to_string()),
+            mode: CostMode::Display,
+            ..LoadOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].date, "2026-06-21");
+        assert_eq!(result[0].project.as_deref(), Some("db-project"));
+        assert_eq!(result[0].input_tokens, 150);
+        assert_eq!(result[0].output_tokens, 30);
+        assert_eq!(result[0].cache_read_tokens, 5);
+        assert_eq!(result[0].cache_creation_tokens, 7);
+        assert_eq!(result[0].models_used, vec!["gpt-5"]);
     }
 
     #[test]

@@ -157,6 +157,14 @@ OpenCode default location:
 - `${OPENCODE_DATA_DIR:-~/.local/share/opencode}/opencode.db` (OpenCode >= 1.2.2)
 - `${OPENCODE_DATA_DIR:-~/.local/share/opencode}/storage/message` (legacy fallback)
 
+Devin default location:
+- `${DEVIN_DATA_DIR:-~/.local/share/devin/cli}` (accepts comma-separated paths)
+
+Devin keeps only the most recent transcripts under `transcripts/`; older
+sessions are summed from `sessions.db` instead. The first scan can take a
+while, so per-session totals are cached in `ccost_session_sums.json` inside
+the data directory.
+
 ## Pricing
 
 Cost calculation modes:
