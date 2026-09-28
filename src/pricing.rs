@@ -645,9 +645,9 @@ mod tests {
     fn resolves_agent_display_names_and_effort_suffixes() {
         let fetcher = PricingFetcher::new();
         let cases = [
-            ("DeepSeek V4.1 Flash Max", 3e-7),
-            ("DeepSeek V4.1 Flash High", 3e-7),
-            ("deepseek-v4-1-flash-max", 3e-7),
+            ("DeepSeek V4.1 Flash Max", 3.483e-8),
+            ("DeepSeek V4.1 Flash High", 3.483e-8),
+            ("deepseek-v4-1-flash-max", 3.483e-8),
             ("GLM-5.2 High", 1.4e-6),
             ("glm-5-2", 1.4e-6),
             ("gpt-6-astra-medium", 1e-5),
