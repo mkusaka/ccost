@@ -3173,20 +3173,6 @@ fn load_devin_daily_usage_data(options: &LoadOptions) -> Result<Vec<DailyUsage>>
             .collect();
         pending.sort_by_key(|(id, _)| *id);
         let mut cache = load_devin_sums_cache(&data_dir);
-        let uncached = pending
-            .iter()
-            .filter(|(id, info)| {
-                cache
-                    .sessions
-                    .get(*id)
-                    .is_none_or(|sums| sums.last_activity_at != info.last_activity_at)
-            })
-            .count();
-        if uncached > 50 {
-            eprintln!(
-                "ccost: summing {uncached} devin sessions from sessions.db (first run may take a while)"
-            );
-        }
         let mut cache_dirty = false;
         for (session_id, info) in pending {
             let Some(timestamp) = info
