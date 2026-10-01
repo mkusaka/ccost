@@ -217,6 +217,10 @@ cargo clippy -- -D warnings
 cargo fmt
 ```
 
+Model-name resolution tests compare aliases against canonical entries in the
+embedded pricing snapshot, so snapshot refreshes do not require updating fixed
+rate expectations.
+
 ## Acknowledgements
 
 This project is heavily based on ccusage, and its daily/monthly logic is

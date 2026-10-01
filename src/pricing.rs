@@ -645,20 +645,44 @@ mod tests {
     fn resolves_agent_display_names_and_effort_suffixes() {
         let fetcher = PricingFetcher::new();
         let cases = [
-            ("DeepSeek V4.1 Flash Max", 3.483e-8),
-            ("DeepSeek V4.1 Flash High", 3.483e-8),
-            ("deepseek-v4-1-flash-max", 3.483e-8),
-            ("GLM-5.2 High", 1.4e-6),
-            ("glm-5-2", 1.4e-6),
-            ("gpt-6-astra-medium", 1e-5),
-            ("SWE-1.7 Max", 5e-7),
-            ("swe-1-7", 5e-7),
+            (
+                "DeepSeek V4.1 Flash Max",
+                "openrouter/deepseek/deepseek-v4.1-flash",
+            ),
+            (
+                "DeepSeek V4.1 Flash High",
+                "openrouter/deepseek/deepseek-v4.1-flash",
+            ),
+            (
+                "deepseek-v4-1-flash-max",
+                "openrouter/deepseek/deepseek-v4.1-flash",
+            ),
+            ("GLM-5.2 High", "zai/glm-5.2"),
+            ("glm-5-2", "zai/glm-5.2"),
+            ("gpt-6-astra-medium", "gpt-6-astra"),
+            ("SWE-1.7 Max", "cognition/swe-1.7"),
+            ("swe-1-7", "cognition/swe-1.7"),
         ];
-        for (name, input_cost) in cases {
+        for (name, canonical_name) in cases {
             let pricing = fetcher
                 .get_model_pricing(name)
                 .unwrap_or_else(|| panic!("no pricing for {name}"));
-            assert_eq!(pricing.input_cost_per_token, Some(input_cost), "{name}");
+            let expected = pricing_dataset()
+                .get(canonical_name)
+                .unwrap_or_else(|| panic!("no pricing for {canonical_name}"));
+            assert_eq!(
+                (
+                    pricing.input_cost_per_token,
+                    pricing.output_cost_per_token,
+                    pricing.cache_read_input_token_cost,
+                ),
+                (
+                    expected.input_cost_per_token,
+                    expected.output_cost_per_token,
+                    expected.cache_read_input_token_cost,
+                ),
+                "{name}"
+            );
         }
         // No public per-token pricing exists for SWE-2 yet.
         assert!(fetcher.get_model_pricing("SWE-2 Max").is_none());
