@@ -4685,14 +4685,14 @@
     "supports_response_schema": true
   },
   "openrouter/deepseek/deepseek-v4.1-flash": {
-    "cache_read_input_token_cost": 6e-09,
-    "input_cost_per_token": 3e-07,
+    "cache_read_input_token_cost": 3e-09,
+    "input_cost_per_token": 3e-09,
     "litellm_provider": "openrouter",
     "max_input_tokens": 1048576,
     "max_output_tokens": 943718,
     "max_tokens": 943718,
     "mode": "chat",
-    "output_cost_per_token": 1.2e-06,
+    "output_cost_per_token": 2.4e-06,
     "source": "https://openrouter.ai/api/v1/models",
     "supports_audio_input": false,
     "supports_function_calling": true,
