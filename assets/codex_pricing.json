@@ -3341,9 +3341,9 @@
     "supports_tool_search": true,
     "supports_vision": true,
     "supports_web_search": true,
-    "supports_none_reasoning_effort": false,
-    "supports_xhigh_reasoning_effort": false,
-    "supports_minimal_reasoning_effort": true,
+    "supports_none_reasoning_effort": true,
+    "supports_xhigh_reasoning_effort": true,
+    "supports_minimal_reasoning_effort": false,
     "deprecation_date": "2027-04-01"
   },
   "gpt-5.4": {
