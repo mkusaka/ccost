@@ -143,7 +143,12 @@
     "bedrock_output_config_effort_ceiling": "xhigh",
     "supports_parallel_tool_use_config": true,
     "prompt_cache_min_tokens": 512,
-    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json"
+    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json",
+    "token_count_model": {
+      "model": "anthropic.claude-fable-5",
+      "litellm_provider": "bedrock_mantle",
+      "region": "us-east-1"
+    }
   },
   "anthropic.claude-fable-5-1": {
     "cache_creation_input_token_cost": 1.25e-05,
@@ -210,7 +215,11 @@
     "supports_parallel_tool_use_config": true,
     "prompt_cache_min_tokens": 4096,
     "input_cost_per_token_batches": 5e-07,
-    "output_cost_per_token_batches": 2.5e-06
+    "output_cost_per_token_batches": 2.5e-06,
+    "token_count_model": {
+      "model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+      "litellm_provider": "bedrock"
+    }
   },
   "anthropic.claude-haiku-4-5@20251001": {
     "cache_creation_input_token_cost": 1.25e-06,
@@ -253,6 +262,7 @@
     "litellm_provider": "bedrock_converse",
     "token_count_model": {
       "model": "anthropic.claude-opus-5-5",
+      "litellm_provider": "bedrock_mantle",
       "region": "us-east-1"
     },
     "supports_tool_search": true,
@@ -378,7 +388,11 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
-    "prompt_cache_min_tokens": 1024
+    "prompt_cache_min_tokens": 1024,
+    "token_count_model": {
+      "model": "anthropic.claude-opus-4-1-20250805-v1:0",
+      "litellm_provider": "bedrock"
+    }
   },
   "anthropic.claude-opus-4-20250514-v1:0": {
     "cache_creation_input_token_cost": 1.875e-05,
@@ -437,7 +451,11 @@
     "bedrock_output_config_effort_ceiling": "high",
     "supports_parallel_tool_use_config": true,
     "prompt_cache_min_tokens": 4096,
-    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json"
+    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json",
+    "token_count_model": {
+      "model": "anthropic.claude-opus-4-5-20251101-v1:0",
+      "litellm_provider": "bedrock"
+    }
   },
   "anthropic.claude-opus-4-6-v1": {
     "supports_adaptive_thinking": true,
@@ -473,7 +491,11 @@
     "bedrock_output_config_effort_ceiling": "max",
     "supports_parallel_tool_use_config": true,
     "prompt_cache_min_tokens": 4096,
-    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json"
+    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json",
+    "token_count_model": {
+      "model": "anthropic.claude-opus-4-6-v1",
+      "litellm_provider": "bedrock"
+    }
   },
   "anthropic.claude-opus-4-7": {
     "bedrock_converse_supports_strict_tools": false,
@@ -511,7 +533,12 @@
     "bedrock_output_config_effort_ceiling": "xhigh",
     "supports_parallel_tool_use_config": true,
     "prompt_cache_min_tokens": 2048,
-    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json"
+    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json",
+    "token_count_model": {
+      "model": "anthropic.claude-opus-4-7",
+      "litellm_provider": "bedrock_mantle",
+      "region": "us-east-1"
+    }
   },
   "anthropic.claude-opus-4-8": {
     "bedrock_converse_supports_strict_tools": false,
@@ -551,7 +578,12 @@
     "bedrock_output_config_effort_ceiling": "xhigh",
     "supports_parallel_tool_use_config": true,
     "prompt_cache_min_tokens": 1024,
-    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json"
+    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json",
+    "token_count_model": {
+      "model": "anthropic.claude-opus-4-8",
+      "litellm_provider": "bedrock_mantle",
+      "region": "us-east-1"
+    }
   },
   "anthropic.claude-opus-5": {
     "bedrock_converse_supports_strict_tools": false,
@@ -589,7 +621,12 @@
     "supports_output_config": true,
     "supports_parallel_tool_use_config": true,
     "prompt_cache_min_tokens": 512,
-    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json"
+    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json",
+    "token_count_model": {
+      "model": "anthropic.claude-opus-5",
+      "litellm_provider": "bedrock_mantle",
+      "region": "us-east-1"
+    }
   },
   "anthropic.claude-opus-5-5": {
     "bedrock_converse_supports_strict_tools": false,
@@ -629,7 +666,12 @@
     "prompt_cache_min_tokens": 512,
     "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json",
     "thinking_always_on": true,
-    "supports_forced_tool_use": false
+    "supports_forced_tool_use": false,
+    "token_count_model": {
+      "model": "anthropic.claude-opus-5-5",
+      "litellm_provider": "bedrock_mantle",
+      "region": "us-east-1"
+    }
   },
   "anthropic.claude-sonnet-4-20250514-v1:0": {
     "cache_creation_input_token_cost": 3.75e-06,
@@ -662,7 +704,11 @@
     "supports_vision": true,
     "bedrock_converse_supports_strict_tools": false,
     "prompt_cache_min_tokens": 1024,
-    "source": "https://aws.amazon.com/bedrock/pricing/"
+    "source": "https://aws.amazon.com/bedrock/pricing/",
+    "token_count_model": {
+      "model": "anthropic.claude-sonnet-4-20250514-v1:0",
+      "litellm_provider": "bedrock"
+    }
   },
   "anthropic.claude-sonnet-4-5-20250929-v1:0": {
     "cache_creation_input_token_cost": 3.75e-06,
@@ -701,7 +747,11 @@
     "prompt_cache_min_tokens": 1024,
     "input_cost_per_token_batches": 1.5e-06,
     "output_cost_per_token_batches": 7.5e-06,
-    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json"
+    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json",
+    "token_count_model": {
+      "model": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "litellm_provider": "bedrock"
+    }
   },
   "anthropic.claude-sonnet-4-6": {
     "supports_adaptive_thinking": true,
@@ -736,7 +786,11 @@
     "supports_output_config": true,
     "supports_parallel_tool_use_config": true,
     "prompt_cache_min_tokens": 1024,
-    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json"
+    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json",
+    "token_count_model": {
+      "model": "anthropic.claude-sonnet-4-6",
+      "litellm_provider": "bedrock"
+    }
   },
   "anthropic.claude-sonnet-5": {
     "bedrock_converse_supports_strict_tools": false,
@@ -776,7 +830,12 @@
     "bedrock_output_config_effort_ceiling": "xhigh",
     "supports_parallel_tool_use_config": true,
     "prompt_cache_min_tokens": 1024,
-    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json"
+    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json",
+    "token_count_model": {
+      "model": "anthropic.claude-sonnet-5",
+      "litellm_provider": "bedrock_mantle",
+      "region": "us-east-1"
+    }
   },
   "anthropic.claude-sonnet-5-5": {
     "bedrock_converse_supports_strict_tools": false,
@@ -787,6 +846,7 @@
     "litellm_provider": "bedrock_converse",
     "token_count_model": {
       "model": "anthropic.claude-opus-5-5",
+      "litellm_provider": "bedrock_mantle",
       "region": "us-east-1"
     },
     "supports_tool_search": true,
