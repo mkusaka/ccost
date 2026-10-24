@@ -646,18 +646,9 @@ mod tests {
     fn resolves_agent_display_names_and_effort_suffixes() {
         let fetcher = PricingFetcher::new();
         let cases = [
-            (
-                "DeepSeek V4.1 Flash Max",
-                "openrouter/deepseek/deepseek-v4.1-flash",
-            ),
-            (
-                "DeepSeek V4.1 Flash High",
-                "openrouter/deepseek/deepseek-v4.1-flash",
-            ),
-            (
-                "deepseek-v4-1-flash-max",
-                "openrouter/deepseek/deepseek-v4.1-flash",
-            ),
+            ("DeepSeek V4.1 Flash Max", "azure_ai/deepseek-v4.1-flash"),
+            ("DeepSeek V4.1 Flash High", "azure_ai/deepseek-v4.1-flash"),
+            ("deepseek-v4-1-flash-max", "azure_ai/deepseek-v4.1-flash"),
             ("GLM-5.2 High", "zai/glm-5.2"),
             ("glm-5-2", "zai/glm-5.2"),
             ("gpt-6-astra-medium", "gpt-6-astra"),

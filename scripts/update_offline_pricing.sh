@@ -39,7 +39,7 @@ claude_prefixes = ("claude-", "anthropic.claude-", "anthropic/claude-")
 codex_prefixes = (
     "gpt-5",
     "gpt-6",
-    "openrouter/deepseek/deepseek-v4.1-flash",
+    "azure_ai/deepseek-v4.1-flash",
     "zai/glm-5.2",
     "openai/gpt-5",
     "azure/gpt-5",
