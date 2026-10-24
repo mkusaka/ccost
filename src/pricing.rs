@@ -470,12 +470,13 @@ fn normalize_model_key(name: &str) -> String {
 
 fn devin_model_pricing(slug: &str) -> Option<LiteLLMModelPricing> {
     // Rates shown by `devin models list`, per token: input, cached input, output.
-    // Devin-only models without per-token pricing (e.g. SWE-2 is listed as
-    // Free) are intentionally absent.
+    // SWE-2 uses the list price from https://docs.devin.ai/desktop/models
+    // (free for self-serve through 2026-10-15; enterprise discounts not modeled).
     let (input, cached, output) = match slug {
         "deepseek-v4-1-flash" => (0.22e-6, 0.01e-6, 0.66e-6),
         "deepseek-v4-flash" => (0.14e-6, 0.03e-6, 0.28e-6),
         "adaptive" => (0.5e-6, 0.1e-6, 2e-6),
+        "swe-2" => (3e-6, 0.3e-6, 15e-6),
         _ => return None,
     };
     Some(LiteLLMModelPricing {
@@ -684,7 +685,7 @@ mod tests {
                 "{name}"
             );
         }
-        // No public per-token pricing exists for SWE-2 yet.
+        // SWE-2 is Devin-only; priced by the Devin fetcher.
         assert!(fetcher.get_model_pricing("SWE-2 Max").is_none());
     }
 
@@ -696,6 +697,8 @@ mod tests {
             ("deepseek-v4-1-flash-high", 0.22e-6),
             ("DeepSeek V4 Flash Max", 0.14e-6),
             ("Adaptive", 0.5e-6),
+            ("SWE-2 Max", 3e-6),
+            ("swe-2-high", 3e-6),
         ];
         for (name, input_cost) in cases {
             let pricing = fetcher
@@ -703,8 +706,6 @@ mod tests {
                 .unwrap_or_else(|| panic!("no pricing for {name}"));
             assert_eq!(pricing.input_cost_per_token, Some(input_cost), "{name}");
         }
-        // SWE-2 is listed as Free by `devin models list`.
-        assert!(fetcher.get_model_pricing("SWE-2 Max").is_none());
     }
 
     #[test]
@@ -862,7 +863,7 @@ mod tests {
             cache_read_input_tokens: 0,
         };
 
-        // SWE-2 has no published token rate; stays $0 until upstream lists it.
+        // SWE-2 is Devin-only; the generic fetcher leaves it at $0.
         let swe17 = fetcher.calculate_cost_from_tokens(&tokens, Some("SWE-1.7 Max"));
         let swe2 = fetcher.calculate_cost_from_tokens(&tokens, Some("SWE-2 High"));
 
