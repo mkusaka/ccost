@@ -3,9 +3,7 @@ on:
   schedule:
     - cron: "0 3 * * *"
   workflow_dispatch:
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 concurrency:
   group: update-offline-pricing
   cancel-in-progress: true
