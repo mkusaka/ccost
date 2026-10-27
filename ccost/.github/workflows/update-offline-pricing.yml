@@ -1,0 +1,88 @@
+name: Update offline pricing data
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: update-offline-pricing
+  cancel-in-progress: true
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Update offline pricing dataset
+        run: bash scripts/update_offline_pricing.sh
+      - name: Create or update pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth setup-git
+
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          BRANCH="automation/update-offline-pricing"
+          TITLE="Update offline pricing data"
+          BODY_FILE="$(mktemp)"
+
+          cat > "$BODY_FILE" << 'EOF'
+          Summary
+
+          Refresh the checked-in offline pricing datasets from LiteLLM.
+
+          Changes
+          - Update `assets/claude_pricing.json`.
+          - Update `assets/codex_pricing.json`.
+          - Regenerate the offline pricing assets via `bash scripts/update_offline_pricing.sh`.
+
+          Why
+
+          Keeping the checked-in pricing assets current preserves offline cost lookup accuracy as upstream model pricing changes.
+
+          Notes
+
+          - This PR is generated automatically by `.github/workflows/update-offline-pricing.yml`.
+          - The workflow opens or updates a PR only when the filtered LiteLLM datasets change.
+
+          Testing
+
+          - `bash scripts/update_offline_pricing.sh`
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git add assets/claude_pricing.json assets/codex_pricing.json
+          git commit -m "$TITLE"
+          git push -f origin "$BRANCH"
+
+          PR_NUMBER="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')"
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            gh pr edit "$PR_NUMBER" --title "$TITLE" --body-file "$BODY_FILE"
+          else
+            gh pr create \
+              --title "$TITLE" \
+              --body-file "$BODY_FILE" \
+              --base main \
+              --head "$BRANCH" \
+              --reviewer "mkusaka"
+
+            PR_NUMBER="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')"
+          fi
+
+          gh pr merge "$PR_NUMBER" --merge
+    permissions:
+      contents: write
+      pull-requests: write
+    timeout-minutes: 60
