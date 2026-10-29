@@ -1389,7 +1389,6 @@
       "us": 1.1
     },
     "supports_output_config": true,
-    "supports_speed": true,
     "prompt_cache_min_tokens": 2048,
     "source": "https://platform.claude.com/docs/en/about-claude/pricing"
   },
@@ -1432,7 +1431,6 @@
       "us": 1.1
     },
     "supports_output_config": true,
-    "supports_speed": true,
     "prompt_cache_min_tokens": 2048
   },
   "claude-opus-4-8": {
@@ -1654,6 +1652,7 @@
     "output_cost_per_token_above_200k_tokens": 2.25e-05,
     "cache_creation_input_token_cost_above_200k_tokens": 7.5e-06,
     "cache_read_input_token_cost_above_200k_tokens": 6e-07,
+    "deprecation_date": "2027-04-08",
     "litellm_provider": "bedrock",
     "supports_tool_search": true,
     "max_input_tokens": 200000,
@@ -1672,7 +1671,8 @@
     "supports_parallel_tool_use_config": true,
     "prompt_cache_min_tokens": 1024,
     "input_cost_per_token_batches": 1.5e-06,
-    "output_cost_per_token_batches": 7.5e-06
+    "output_cost_per_token_batches": 7.5e-06,
+    "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-4-5.md"
   },
   "claude-sonnet-4-6": {
     "supports_web_search": true,
