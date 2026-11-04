@@ -236,7 +236,11 @@
     "supports_native_streaming": true,
     "supports_native_structured_output": true,
     "supports_parallel_tool_use_config": true,
-    "prompt_cache_min_tokens": 4096
+    "prompt_cache_min_tokens": 4096,
+    "token_count_model": {
+      "model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+      "litellm_provider": "bedrock"
+    }
   },
   "anthropic.claude-haiku-5-5": {
     "input_cost_per_token_above_100k_tokens": 5e-07,
@@ -353,6 +357,7 @@
     "cache_creation_input_token_cost": 1.875e-05,
     "cache_read_input_token_cost": 1.5e-06,
     "deprecation_date": "2027-01-08",
+    "deprecation_source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle-legacy.html",
     "input_cost_per_token": 1.5e-05,
     "litellm_provider": "bedrock_converse",
     "max_input_tokens": 200000,
@@ -600,12 +605,14 @@
     "supports_output_config": true,
     "supports_parallel_tool_use_config": true,
     "prompt_cache_min_tokens": 512,
-    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json",
+    "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
     "token_count_model": {
       "model": "anthropic.claude-opus-5",
       "litellm_provider": "bedrock_mantle",
       "region": "us-east-1"
-    }
+    },
+    "input_cost_per_token_batches": 2.5e-06,
+    "output_cost_per_token_batches": 1.25e-05
   },
   "anthropic.claude-opus-5-5": {
     "bedrock_converse_supports_strict_tools": false,
@@ -655,6 +662,8 @@
     "cache_creation_input_token_cost": 3.75e-06,
     "cache_read_input_token_cost": 3e-07,
     "deprecation_date": "2026-10-14",
+    "deprecation_source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle-legacy.html",
+    "successor_model": "anthropic.claude-sonnet-5",
     "input_cost_per_token": 3e-06,
     "input_cost_per_token_above_200k_tokens": 6e-06,
     "output_cost_per_token_above_200k_tokens": 2.25e-05,
@@ -698,6 +707,8 @@
     "cache_creation_input_token_cost_above_200k_tokens": 7.5e-06,
     "cache_read_input_token_cost_above_200k_tokens": 6e-07,
     "deprecation_date": "2027-04-08",
+    "deprecation_source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle-legacy.html",
+    "successor_model": "anthropic.claude-sonnet-5-5",
     "litellm_provider": "bedrock_converse",
     "supports_tool_search": true,
     "max_input_tokens": 200000,
@@ -1160,6 +1171,7 @@
   },
   "claude-mythos-preview": {
     "deprecation_date": "2026-06-09",
+    "deprecation_source": "https://platform.claude.com/docs/en/about-claude/model-deprecations",
     "supports_anthropic_compaction": true,
     "cache_creation_input_token_cost": 1.25e-05,
     "cache_creation_input_token_cost_above_1hr": 2e-05,
@@ -1583,6 +1595,8 @@
     "cache_creation_input_token_cost_batches": 1.875e-06,
     "cache_read_input_token_cost_batches": 1.5e-07,
     "deprecation_date": "2026-11-30",
+    "deprecation_source": "https://platform.claude.com/docs/en/about-claude/model-deprecations",
+    "successor_model": "claude-sonnet-5-5",
     "input_cost_per_token_batches": 1.5e-06,
     "litellm_provider": "anthropic",
     "max_input_tokens": 200000,
@@ -1616,6 +1630,8 @@
     "cache_creation_input_token_cost_batches": 1.875e-06,
     "cache_read_input_token_cost_batches": 1.5e-07,
     "deprecation_date": "2026-11-30",
+    "deprecation_source": "https://platform.claude.com/docs/en/about-claude/model-deprecations",
+    "successor_model": "claude-sonnet-5-5",
     "input_cost_per_token_batches": 1.5e-06,
     "litellm_provider": "anthropic",
     "max_input_tokens": 200000,
@@ -1653,6 +1669,7 @@
     "cache_creation_input_token_cost_above_200k_tokens": 7.5e-06,
     "cache_read_input_token_cost_above_200k_tokens": 6e-07,
     "deprecation_date": "2027-04-08",
+    "deprecation_source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-4-5.md",
     "litellm_provider": "bedrock",
     "supports_tool_search": true,
     "max_input_tokens": 200000,
@@ -1672,7 +1689,11 @@
     "prompt_cache_min_tokens": 1024,
     "input_cost_per_token_batches": 1.5e-06,
     "output_cost_per_token_batches": 7.5e-06,
-    "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-4-5.md"
+    "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-4-5.md",
+    "token_count_model": {
+      "model": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "litellm_provider": "bedrock"
+    }
   },
   "claude-sonnet-4-6": {
     "supports_web_search": true,
