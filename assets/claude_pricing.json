@@ -977,6 +977,9 @@
     "supports_native_structured_output": true,
     "source": "https://platform.claude.com/docs/en/about-claude/pricing"
   },
+  "claude-fable-latest": {
+    "alias_of": "claude-fable-5-1"
+  },
   "claude-haiku-4-5": {
     "cache_creation_input_token_cost": 1.25e-06,
     "cache_creation_input_token_cost_above_1hr": 2e-06,
@@ -1085,6 +1088,9 @@
     "cache_creation_input_token_cost_above_100k_tokens": 6.25e-07,
     "cache_creation_input_token_cost_above_1hr_above_100k_tokens": 1e-06,
     "cache_read_input_token_cost_above_100k_tokens": 5e-08
+  },
+  "claude-haiku-latest": {
+    "alias_of": "claude-haiku-5-5"
   },
   "claude-mythos-5": {
     "supports_anthropic_compaction": true,
@@ -1592,6 +1598,9 @@
     "prompt_cache_min_tokens": 512,
     "source": "https://platform.claude.com/docs/en/about-claude/pricing"
   },
+  "claude-opus-latest": {
+    "alias_of": "claude-opus-5-5"
+  },
   "claude-sonnet-4-5": {
     "cache_creation_input_token_cost": 3.75e-06,
     "cache_creation_input_token_cost_above_1hr": 6e-06,
@@ -1831,5 +1840,8 @@
     "prompt_cache_min_tokens": 512,
     "source": "https://platform.claude.com/docs/en/about-claude/pricing",
     "supports_web_search": true
+  },
+  "claude-sonnet-latest": {
+    "alias_of": "claude-sonnet-5-5"
   }
 }
