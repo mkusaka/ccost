@@ -2089,6 +2089,18 @@
     "deprecation_source": "https://learn.microsoft.com/en-us/azure/foundry/concepts/model-lifecycle-retirement",
     "source": "https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/deepseek-v4-1-flash-is-coming-to-microsoft-foundry/4556431"
   },
+  "azure_ai/deepseek-v4.1-flash-1017": {
+    "input_cost_per_token": 3e-07,
+    "output_cost_per_token": 1.2e-06,
+    "cache_read_input_token_cost": 6e-09,
+    "litellm_provider": "azure_ai",
+    "mode": "chat",
+    "max_input_tokens": 1000000,
+    "max_output_tokens": 128000,
+    "supports_prompt_caching": true,
+    "supports_vision": false,
+    "source": "https://ai.azure.com/catalog/models/DeepSeek-V4.1-Flash-1017"
+  },
   "azure_ai/kimi-k2.5": {
     "deprecation_date": "2027-01-26",
     "deprecation_source": "https://learn.microsoft.com/en-us/azure/foundry/concepts/model-lifecycle-retirement",
