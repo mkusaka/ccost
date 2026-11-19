@@ -30,6 +30,7 @@
     "supports_vision": true,
     "cache_creation_input_token_cost": 3.75e-06,
     "cache_read_input_token_cost": 3e-07,
+    "successor_model": "claude-sonnet-4-5-20250929-v1:0",
     "deprecation_date": "2026-11-13",
     "deprecation_source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle-legacy.html"
   },
@@ -50,6 +51,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
+    "successor_model": "claude-sonnet-4-5-20250929-v1:0",
     "deprecation_date": "2026-11-13",
     "deprecation_source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle-legacy.html"
   },
@@ -90,6 +92,7 @@
     "supports_response_schema": true,
     "supports_tool_choice": true,
     "supports_vision": true,
+    "successor_model": "anthropic.claude-sonnet-5-5",
     "deprecation_date": "2026-11-13",
     "deprecation_source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle-legacy.html"
   },
@@ -433,6 +436,7 @@
   "anthropic.claude-opus-4-1-20250805-v1:0": {
     "cache_creation_input_token_cost": 1.875e-05,
     "cache_read_input_token_cost": 1.5e-06,
+    "successor_model": "anthropic.claude-opus-4-8",
     "deprecation_date": "2027-01-08",
     "deprecation_source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle-legacy.html",
     "input_cost_per_token": 1.5e-05,
@@ -1351,7 +1355,6 @@
     "supports_speed": true
   },
   "claude-mythos-preview": {
-    "deprecation_date": "2026-06-09",
     "deprecation_source": "https://platform.claude.com/docs/en/about-claude/model-deprecations",
     "supports_anthropic_compaction": true,
     "cache_creation_input_token_cost": 1.25e-05,
