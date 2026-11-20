@@ -1856,6 +1856,7 @@
     "output_cost_per_token_above_200k_tokens": 2.25e-05,
     "cache_creation_input_token_cost_above_200k_tokens": 7.5e-06,
     "cache_read_input_token_cost_above_200k_tokens": 6e-07,
+    "successor_model": "anthropic.claude-sonnet-5-5",
     "deprecation_date": "2027-04-08",
     "deprecation_source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-4-5.md",
     "litellm_provider": "bedrock",
