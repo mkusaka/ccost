@@ -5850,6 +5850,7 @@
     "supports_video_input": true,
     "supports_vision": true,
     "supports_web_search": true,
+    "supports_search_tools_with_functions": true,
     "supports_native_streaming": true,
     "input_cost_per_token_priority": 3.6e-06,
     "input_cost_per_token_above_200k_tokens_priority": 7.2e-06,

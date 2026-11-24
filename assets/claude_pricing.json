@@ -518,9 +518,12 @@
     "supports_native_structured_output": true,
     "supports_output_config": true,
     "bedrock_output_config_effort_ceiling": "high",
+    "deprecation_date": "2027-05-23",
+    "deprecation_source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle-legacy.html",
     "supports_parallel_tool_use_config": true,
     "prompt_cache_min_tokens": 4096,
     "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json",
+    "successor_model": "anthropic.claude-opus-5-5",
     "token_count_model": {
       "model": "anthropic.claude-opus-4-5-20251101-v1:0",
       "litellm_provider": "bedrock"
@@ -1403,6 +1406,8 @@
     "cache_creation_input_token_cost_batches": 3.125e-06,
     "cache_read_input_token_cost": 5e-07,
     "cache_read_input_token_cost_batches": 2.5e-07,
+    "deprecation_date": "2027-01-22",
+    "deprecation_source": "https://platform.claude.com/docs/en/about-claude/model-deprecations",
     "input_cost_per_token": 5e-06,
     "input_cost_per_token_batches": 2.5e-06,
     "litellm_provider": "anthropic",
@@ -1429,7 +1434,8 @@
     "supports_vision": true,
     "supports_output_config": true,
     "prompt_cache_min_tokens": 4096,
-    "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "successor_model": "claude-opus-5-5"
   },
   "claude-opus-4-5-20251101": {
     "supports_low_reasoning_effort": true,
@@ -1439,6 +1445,8 @@
     "cache_creation_input_token_cost_batches": 3.125e-06,
     "cache_read_input_token_cost": 5e-07,
     "cache_read_input_token_cost_batches": 2.5e-07,
+    "deprecation_date": "2027-01-22",
+    "deprecation_source": "https://platform.claude.com/docs/en/about-claude/model-deprecations",
     "input_cost_per_token": 5e-06,
     "input_cost_per_token_batches": 2.5e-06,
     "litellm_provider": "anthropic",
@@ -1464,7 +1472,9 @@
     "supports_tool_choice": true,
     "supports_vision": true,
     "supports_output_config": true,
-    "prompt_cache_min_tokens": 4096
+    "prompt_cache_min_tokens": 4096,
+    "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "successor_model": "claude-opus-5-5"
   },
   "claude-opus-4-6": {
     "supports_low_reasoning_effort": true,
